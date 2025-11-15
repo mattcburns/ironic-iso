@@ -1,0 +1,79 @@
+name: Build Ironic ISO
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch: {}
+
+jobs:
+  build-ironic-iso:
+    runs-on: ubuntu-latest
+
+    env:
+      BASE_DISTRO: centos
+      DIB_RELEASE: "9-stream"
+      IMAGE_NAME: ironic-centos9-ipa
+      ARTIFACTS_DIR: artifacts
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            qemu-utils \
+            kpartx \
+            debootstrap \
+            squashfs-tools \
+            xorriso \
+            syslinux \
+            isolinux \
+            python3-dev \
+            gcc \
+            make \
+            libffi-dev \
+            libssl-dev
+
+      - name: Upgrade pip and install Python packages
+        run: |
+          python -m pip install --upgrade pip
+          pip install \
+            diskimage-builder \
+            ironic-python-agent-builder
+
+      - name: Show versions
+        run: |
+          python --version
+          pip show diskimage-builder || true
+          pip show ironic-python-agent-builder || true
+
+      - name: Build Ironic ISO
+        run: |
+          chmod +x scripts/build_ironic_iso.sh
+          bash scripts/build_ironic_iso.sh
+
+      - name: Upload ISO artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ironic-centos9-iso
+          path: artifacts/*.iso
+
+      - name: Upload logs and build outputs (optional)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs-and-outputs
+          path: |
+            ipa-build/**
+            iso-work/**
+            artifacts/**
+          if-no-files-found: ignore
