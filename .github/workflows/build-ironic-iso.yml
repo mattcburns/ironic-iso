@@ -67,7 +67,7 @@ jobs:
         with:
           name: ironic-centos9-iso
           path: artifacts/*.iso
-          retention-days: 30
+          retention-days: 3
 
       - name: Upload logs and build outputs (optional)
         if: always()
