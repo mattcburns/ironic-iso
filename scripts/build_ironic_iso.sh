@@ -30,14 +30,13 @@ mkdir -p "${IPA_OUTPUT_DIR}"
 
 echo "Building ironic-python-agent ramdisk..."
 ironic-python-agent-builder \
-  --output-prefix "${IMAGE_NAME}" \
-  --output-dir "${IPA_OUTPUT_DIR}" \
-  --release "${DIB_RELEASE}" \
-  "${BASE_DISTRO}" \
-  ${ELEMENTS}
+  -o "${IPA_OUTPUT_DIR}" \
+  -e "${ELEMENTS}" \
+  -r "${DIB_RELEASE}" \
+  "${BASE_DISTRO}"
 
-IPA_KERNEL="${IPA_OUTPUT_DIR}/${IMAGE_NAME}.kernel"
-IPA_RAMDISK="${IPA_OUTPUT_DIR}/${IMAGE_NAME}.initramfs"
+IPA_KERNEL="${IPA_OUTPUT_DIR}/ipa.kernel"
+IPA_RAMDISK="${IPA_OUTPUT_DIR}/ipa.initramfs"
 
 if [[ ! -f "${IPA_KERNEL}" || ! -f "${IPA_RAMDISK}" ]]; then
     echo "ERROR: IPA kernel or ramdisk not found in ${IPA_OUTPUT_DIR}"
