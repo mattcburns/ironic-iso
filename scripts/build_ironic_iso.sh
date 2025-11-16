@@ -19,9 +19,10 @@ export DIB_DEBUG_TRACE=1
 export DIB_RELEASE
 export DIB_CLOUD_IMAGES=""
 
-# Base elements for an ironic-python-agent image
-# You may customize this list with hardware-specific elements as needed.
-ELEMENTS="ironic-python-agent-ramdisk element-manifest"
+# Extra elements to include in addition to the default ipa ramdisk elements
+# Do NOT include 'ironic-python-agent-ramdisk' here; the builder adds it.
+# Space-separated list, e.g. "element-manifest some-driver". Can be empty.
+ELEMENTS_EXTRA="element-manifest"
 
 # Build the ramdisk + kernel using ironic-python-agent-builder
 # Note: This creates a kernel and ramdisk; we then wrap into an ISO.
@@ -29,10 +30,20 @@ IPA_OUTPUT_DIR="$(pwd)/ipa-build"
 mkdir -p "${IPA_OUTPUT_DIR}"
 
 echo "Building ironic-python-agent ramdisk..."
+
+# Convert ELEMENTS_EXTRA into repeated -e flags safely
+EXTRA_E_ARGS=()
+if [[ -n "${ELEMENTS_EXTRA}" ]]; then
+  read -r -a _els <<< "${ELEMENTS_EXTRA}"
+  for _e in "${_els[@]}"; do
+    [[ -n "${_e}" ]] && EXTRA_E_ARGS+=( -e "${_e}" )
+  done
+fi
+
 ironic-python-agent-builder \
   -o "${IPA_OUTPUT_DIR}" \
-  -e "${ELEMENTS}" \
   -r "${DIB_RELEASE}" \
+  "${EXTRA_E_ARGS[@]}" \
   "${BASE_DISTRO}"
 
 IPA_KERNEL="${IPA_OUTPUT_DIR}/ipa.kernel"
