@@ -29,6 +29,10 @@ ELEMENTS_EXTRA="element-manifest"
 IPA_OUTPUT_DIR="$(pwd)/ipa-build"
 mkdir -p "${IPA_OUTPUT_DIR}"
 
+# The -o flag expects an output PREFIX (file path), not a directory.
+# We'll produce files like: ${IPA_OUTPUT_DIR}/${IMAGE_NAME}.kernel and .initramfs
+IPA_PREFIX="${IPA_OUTPUT_DIR}/${IMAGE_NAME}"
+
 echo "Building ironic-python-agent ramdisk..."
 
 # Convert ELEMENTS_EXTRA into repeated -e flags safely
@@ -41,13 +45,13 @@ if [[ -n "${ELEMENTS_EXTRA}" ]]; then
 fi
 
 ironic-python-agent-builder \
-  -o "${IPA_OUTPUT_DIR}" \
+  -o "${IPA_PREFIX}" \
   -r "${DIB_RELEASE}" \
   "${EXTRA_E_ARGS[@]}" \
   "${BASE_DISTRO}"
 
-IPA_KERNEL="${IPA_OUTPUT_DIR}/ipa.kernel"
-IPA_RAMDISK="${IPA_OUTPUT_DIR}/ipa.initramfs"
+IPA_KERNEL="${IPA_PREFIX}.kernel"
+IPA_RAMDISK="${IPA_PREFIX}.initramfs"
 
 if [[ ! -f "${IPA_KERNEL}" || ! -f "${IPA_RAMDISK}" ]]; then
     echo "ERROR: IPA kernel or ramdisk not found in ${IPA_OUTPUT_DIR}"
