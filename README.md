@@ -17,8 +17,8 @@ The workflow:
 
 ## How to trigger
 
-- Push to `main`
-- Open a pull request targeting `main`
+- Push to `master`
+- Open a pull request targeting `master`
 - Or trigger manually:
 
 1. Go to **Actions** tab
@@ -26,6 +26,28 @@ The workflow:
 3. Click **Run workflow**
 
 The built ISO will be available as an artifact attached to the workflow run.
+
+## How to download the ISO
+
+There are two options:
+
+1) From the workflow run artifacts (quickest)
+
+- Go to the **Actions** tab
+- Open the latest run of "Build Ironic ISO"
+- Download the artifact named `ironic-centos9-iso` (contains `*.iso`)
+
+2) From a GitHub Release (shareable permalink)
+
+- Create and push a tag, e.g. `v0.1.0`:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+- The workflow will publish a Release for that tag and attach the built ISO.
+- Navigate to **Releases** in the repo to download the asset.
 
 ## Local dry run
 
