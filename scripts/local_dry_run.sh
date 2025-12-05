@@ -14,6 +14,10 @@ sudo apt-get install -y \
   xorriso \
   syslinux \
   isolinux \
+  grub-pc-bin \
+  grub-efi-amd64-bin \
+  mtools \
+  dosfstools \
   python3-venv \
   python3-dev \
   gcc \
