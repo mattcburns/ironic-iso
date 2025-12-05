@@ -6,6 +6,8 @@ GitHub Actions–based pipeline to build custom OpenStack Ironic images in ISO f
 - `diskimage-builder`
 - CentOS Stream 9 as the base OS
 
+The resulting ISO is hybrid and supports both BIOS/legacy (isolinux) and UEFI (GRUB) boot modes.
+
 ## GitHub Actions Workflow
 
 The workflow:
@@ -58,3 +60,12 @@ To test the build locally on a Debian/Ubuntu-like system, run:
 ```
 
 This will create a Python virtualenv, install the required packages, and build the ISO into an `artifacts/` directory.
+
+### EFI/UEFI dependencies
+
+Hybrid ISO creation requires GRUB for UEFI and FAT tooling for the embedded EFI image. The `local_dry_run.sh` script installs:
+
+- `grub-efi-amd64-bin` and `grub-pc-bin` (for `grub-mkstandalone`)
+- `mtools` and `dosfstools` (for creating the FAT EFI image)
+
+On RHEL/CentOS/Fedora, install the equivalents (e.g., `grub2-efi-x64`, `grub2-pc`, `mtools`, `dosfstools`).

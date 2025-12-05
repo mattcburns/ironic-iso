@@ -6,6 +6,7 @@ set -euxo pipefail
 : "${DIB_RELEASE:=9-stream}"          # CentOS Stream 9
 : "${IMAGE_NAME:=ironic-centos9-ipa}"
 : "${ARTIFACTS_DIR:=artifacts}"
+: "${EFI_IMG_MB:=16}"                 # Size of the FAT EFI image
 
 mkdir -p "${ARTIFACTS_DIR}"
 
@@ -13,6 +14,7 @@ echo "Using base distro: ${BASE_DISTRO}"
 echo "Using DIB release: ${DIB_RELEASE}"
 echo "Image name:        ${IMAGE_NAME}"
 echo "Artifacts dir:     ${ARTIFACTS_DIR}"
+echo "EFI image size:    ${EFI_IMG_MB}MiB"
 
 # Ensure required env vars for diskimage-builder are set
 export DIB_DEBUG_TRACE=1
@@ -59,15 +61,14 @@ if [[ ! -f "${IPA_KERNEL}" || ! -f "${IPA_RAMDISK}" ]]; then
     exit 1
 fi
 
-# Wrap kernel+ramdisk into an ISO
+# Wrap kernel+ramdisk into a hybrid (BIOS + UEFI) ISO
 ISO_OUTPUT="${ARTIFACTS_DIR}/${IMAGE_NAME}.iso"
 
 echo "Creating ISO: ${ISO_OUTPUT}"
-# A simple approach using xorriso and a grub/syslinux based template could be used.
-# For now, we use a very simple isolinux-based layout.
 WORKDIR="$(pwd)/iso-work"
 mkdir -p "${WORKDIR}/isolinux"
 mkdir -p "${WORKDIR}/boot"
+mkdir -p "${WORKDIR}/EFI"
 
 cp "${IPA_KERNEL}" "${WORKDIR}/boot/vmlinuz"
 cp "${IPA_RAMDISK}" "${WORKDIR}/boot/initrd.img"
@@ -91,15 +92,75 @@ if [[ ! -f "${ISOLINUX_BIN}" ]]; then
 fi
 cp "${ISOLINUX_BIN}" "${WORKDIR}/isolinux/isolinux.bin"
 
-xorriso -as mkisofs \
-  -o "${ISO_OUTPUT}" \
-  -b isolinux/isolinux.bin \
-  -c isolinux/boot.cat \
-  -no-emul-boot \
-  -boot-load-size 4 \
-  -boot-info-table \
-  -V "IRONIC_IPA_ISO" \
+ISOHYBRID_MBR="/usr/lib/ISOLINUX/isohdpfx.bin"
+if [[ ! -f "${ISOHYBRID_MBR}" ]]; then
+    echo "WARNING: isohdpfx.bin not found at ${ISOHYBRID_MBR}; ISO will still build but hybrid MBR may be missing"
+    ISOHYBRID_MBR=""
+fi
+
+# Build a minimal GRUB UEFI image and embed the boot config
+EFI_STAGING="${WORKDIR}/efi-staging"
+EFI_BOOT_DIR="${EFI_STAGING}/EFI/BOOT"
+mkdir -p "${EFI_BOOT_DIR}"
+
+cat > "${EFI_BOOT_DIR}/grub.cfg" <<'EOF'
+search --no-floppy --file /boot/vmlinuz --set=root
+set default=0
+set timeout=5
+
+menuentry "Ironic Python Agent (UEFI)" {
+  linux /boot/vmlinuz console=tty0 console=ttyS0,115200n8
+  initrd /boot/initrd.img
+}
+EOF
+
+if ! command -v grub-mkstandalone >/dev/null 2>&1; then
+    echo "ERROR: grub-mkstandalone not found; install grub-efi-amd64-bin (Debian/Ubuntu) or grub2-efi-x64 (RHEL/CentOS)."
+    exit 1
+fi
+
+GRUB_STANDALONE="${EFI_BOOT_DIR}/BOOTX64.EFI"
+grub-mkstandalone \
+  -O x86_64-efi \
+  -o "${GRUB_STANDALONE}" \
+  --compress=xz \
+  "boot/grub/grub.cfg=${EFI_BOOT_DIR}/grub.cfg"
+
+EFI_IMG="${WORKDIR}/EFI/efiboot.img"
+for tool in mkfs.vfat mmd mcopy; do
+  if ! command -v "${tool}" >/dev/null 2>&1; then
+    echo "ERROR: ${tool} not found; install dosfstools (mkfs.vfat) and mtools (mmd/mcopy)."
+    exit 1
+  fi
+done
+
+truncate -s "${EFI_IMG_MB}M" "${EFI_IMG}"
+mkfs.vfat "${EFI_IMG}"
+mmd -i "${EFI_IMG}" ::/EFI ::/EFI/BOOT
+mcopy -i "${EFI_IMG}" "${GRUB_STANDALONE}" ::/EFI/BOOT/BOOTX64.EFI
+mcopy -i "${EFI_IMG}" "${EFI_BOOT_DIR}/grub.cfg" ::/EFI/BOOT/grub.cfg
+
+# Assemble the hybrid ISO: isolinux for BIOS, GRUB for UEFI
+XORRISO_ARGS=(
+  -o "${ISO_OUTPUT}"
+  -b isolinux/isolinux.bin
+  -c isolinux/boot.cat
+  -no-emul-boot
+  -boot-load-size 4
+  -boot-info-table
+  -eltorito-alt-boot
+  -e EFI/efiboot.img
+  -no-emul-boot
+  -isohybrid-gpt-basdat
+  -V "IRONIC_IPA_ISO"
   "${WORKDIR}"
+)
+
+if [[ -n "${ISOHYBRID_MBR}" ]]; then
+  XORRISO_ARGS=( -isohybrid-mbr "${ISOHYBRID_MBR}" "${XORRISO_ARGS[@]}" )
+fi
+
+xorriso -as mkisofs "${XORRISO_ARGS[@]}"
 
 echo "Build complete. ISO at: ${ISO_OUTPUT}"
 ls -lh "${ARTIFACTS_DIR}"

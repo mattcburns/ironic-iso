@@ -42,7 +42,11 @@ jobs:
             gcc \
             make \
             libffi-dev \
-            libssl-dev
+            libssl-dev \
+            grub-pc-bin \
+            grub-efi-amd64-bin \
+            mtools \
+            dosfstools
 
       - name: Upgrade pip and install Python packages
         run: |
