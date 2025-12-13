@@ -74,6 +74,7 @@ jobs:
             artifacts/*.iso
             artifacts/*.kernel
             artifacts/*.initramfs
+            artifacts/*.img
           retention-days: 3
 
       - name: Upload logs and build outputs (optional)
@@ -108,5 +109,6 @@ jobs:
             dist/*.iso
             dist/*.kernel
             dist/*.initramfs
+            dist/*.img
           draft: false
           prerelease: false
