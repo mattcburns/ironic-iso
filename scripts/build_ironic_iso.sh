@@ -167,11 +167,27 @@ fi
 
 xorriso -as mkisofs "${XORRISO_ARGS[@]}"
 
+# Verify UEFI ESP image was created
+if [[ ! -f "${EFI_IMG}" ]]; then
+    echo "ERROR: UEFI ESP image not found at ${EFI_IMG}"
+    exit 1
+fi
+
 # Copy kernel and initramfs to artifacts directory for publishing
 cp "${IPA_KERNEL}" "${ARTIFACTS_DIR}/${IMAGE_NAME}.kernel"
 cp "${IPA_RAMDISK}" "${ARTIFACTS_DIR}/${IMAGE_NAME}.initramfs"
 
+# Copy UEFI ESP image for on-the-fly ISO creation support with OpenStack Ironic
+cp "${EFI_IMG}" "${ARTIFACTS_DIR}/${IMAGE_NAME}-efiboot.img"
+
+# Verify all artifacts are present
+if [[ ! -f "${ARTIFACTS_DIR}/${IMAGE_NAME}.iso" || ! -f "${ARTIFACTS_DIR}/${IMAGE_NAME}-efiboot.img" ]]; then
+    echo "ERROR: ISO or ESP image failed to copy to artifacts directory"
+    exit 1
+fi
+
 echo "Build complete. ISO at: ${ISO_OUTPUT}"
 echo "Kernel at: ${ARTIFACTS_DIR}/${IMAGE_NAME}.kernel"
 echo "Initramfs at: ${ARTIFACTS_DIR}/${IMAGE_NAME}.initramfs"
+echo "UEFI ESP image at: ${ARTIFACTS_DIR}/${IMAGE_NAME}-efiboot.img"
 ls -lh "${ARTIFACTS_DIR}"
