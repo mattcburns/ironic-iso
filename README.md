@@ -69,3 +69,29 @@ Hybrid ISO creation requires GRUB for UEFI and FAT tooling for the embedded EFI 
 - `mtools` and `dosfstools` (for creating the FAT EFI image)
 
 On RHEL/CentOS/Fedora, install the equivalents (e.g., `grub2-efi-x64`, `grub2-pc`, `mtools`, `dosfstools`).
+
+## Root Password
+
+The built ISO includes a hardcoded root password for easier testing and development:
+
+- **Username:** `root`
+- **Password:** `ironic`
+
+This password is set during the ISO build process via the `ironic-root-password` element.
+
+### Customizing the Root Password
+
+To change the root password, you can override the `IRONIC_ROOT_PASSWORD` environment variable when building:
+
+```bash
+IRONIC_ROOT_PASSWORD=mypassword ./scripts/build_ironic_iso.sh
+```
+
+### Security Notice
+
+The hardcoded root password is intended **for development and testing only**. For production deployments, you should:
+
+1. Set a strong, unique password
+2. Consider using key-based authentication instead
+3. Disable direct root login if possible
+
