@@ -109,24 +109,20 @@ EFI_BOOT_DIR="${EFI_STAGING}/EFI/BOOT"
 mkdir -p "${EFI_BOOT_DIR}"
 
 cat > "${EFI_BOOT_DIR}/grub.cfg" <<'EOF'
-# Try to locate the kernel - check root first (for Ironic on-the-fly), then /boot/
-search --no-floppy --file /vmlinuz --set=root
-if [ -z "$root" ]; then
-  search --no-floppy --file /boot/vmlinuz --set=root
-fi
-
 set default=0
 set timeout=5
 
 menuentry "Ironic Python Agent (UEFI)" {
-  # Try root directory first (Ironic on-the-fly ISO creation)
-  if [ -f /vmlinuz ]; then
+  # Prefer root (Ironic on-the-fly ISO creation places files at root)
+  if [ -f /vmlinuz -a -f /initrd ]; then
     linux /vmlinuz console=tty0 console=ttyS0,115200n8
     initrd /initrd
   # Fallback to /boot/ directory (standard ISO structure)
   elif [ -f /boot/vmlinuz ]; then
     linux /boot/vmlinuz console=tty0 console=ttyS0,115200n8
     initrd /boot/initrd.img
+  else
+    echo "Kernel or initrd not found"
   fi
 }
 EOF
@@ -137,11 +133,27 @@ if ! command -v grub-mkstandalone >/dev/null 2>&1; then
 fi
 
 GRUB_STANDALONE="${EFI_BOOT_DIR}/BOOTX64.EFI"
+# Embed a bootstrap config that chainloads the external EFI/BOOT/grub.cfg on the ESP
+cat > "${EFI_BOOT_DIR}/bootstrap.cfg" <<'EOF'
+set timeout=0
+# Load external config from ESP so Ironic can inject kernel params
+if [ -f ($root)/EFI/BOOT/grub.cfg ]; then
+  configfile ($root)/EFI/BOOT/grub.cfg
+else
+  search --no-floppy --file /EFI/BOOT/grub.cfg --set=espdev
+  if [ -n "$espdev" ]; then
+    configfile ($espdev)/EFI/BOOT/grub.cfg
+  else
+    echo "EFI/BOOT/grub.cfg not found"
+  fi
+fi
+EOF
+
 grub-mkstandalone \
   -O x86_64-efi \
   -o "${GRUB_STANDALONE}" \
   --compress=xz \
-  "boot/grub/grub.cfg=${EFI_BOOT_DIR}/grub.cfg"
+  "boot/grub/grub.cfg=${EFI_BOOT_DIR}/bootstrap.cfg"
 
 EFI_IMG="${WORKDIR}/EFI/efiboot.img"
 for tool in mkfs.vfat mmd mcopy; do
@@ -156,6 +168,8 @@ mkfs.vfat "${EFI_IMG}"
 mmd -i "${EFI_IMG}" ::/EFI ::/EFI/BOOT
 mcopy -i "${EFI_IMG}" "${GRUB_STANDALONE}" ::/EFI/BOOT/BOOTX64.EFI
 mcopy -i "${EFI_IMG}" "${EFI_BOOT_DIR}/grub.cfg" ::/EFI/BOOT/grub.cfg
+# Note for OpenStack Ironic:
+# Set grub_config_path=EFI/BOOT/grub.cfg so Ironic can inject kernel params
 
 # Assemble the hybrid ISO: isolinux for BIOS, GRUB for UEFI
 XORRISO_ARGS=(
