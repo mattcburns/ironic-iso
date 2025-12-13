@@ -113,17 +113,40 @@ set default=0
 set timeout=5
 
 menuentry "Ironic Python Agent (UEFI)" {
-  # Prefer root (Ironic on-the-fly ISO creation places files at root)
-  if [ -f /vmlinuz -a -f /initrd ]; then
-    linux /vmlinuz console=tty0 console=ttyS0,115200n8
-    initrd /initrd
-  # Fallback to /boot/ directory (standard ISO structure)
-  elif [ -f /boot/vmlinuz ]; then
-    linux /boot/vmlinuz console=tty0 console=ttyS0,115200n8
-    initrd /boot/initrd.img
-  else
-    echo "Kernel or initrd not found"
+  # Anchor root to ESP so relative paths work
+  search --no-floppy --file /EFI/BOOT/grub.cfg --set=root
+
+  # Discover kernel and initrd across common locations
+  set kernel=""
+  for k in /vmlinuz /kernel /boot/vmlinuz /boot/kernel; do
+    if [ -f $k ]; then
+      set kernel=$k
+      break
+    fi
+  done
+
+  set initrd_img=""
+  for r in /initrd /initrd.img /initramfs /initramfs.img /boot/initrd /boot/initrd.img /boot/initramfs /boot/initramfs.img; do
+    if [ -f $r ]; then
+      set initrd_img=$r
+      break
+    fi
+  done
+
+  if [ -z "$kernel" ]; then
+    echo "Kernel not found (looked for /vmlinuz /kernel /boot/vmlinuz /boot/kernel)"
+    sleep 5
+    return
   fi
+
+  if [ -z "$initrd_img" ]; then
+    echo "Initrd not found (looked for /initrd[.img] /initramfs[.img] and /boot equivalents)"
+    sleep 5
+    return
+  fi
+
+  linux $kernel console=tty0 console=ttyS0,115200n8
+  initrd $initrd_img
 }
 EOF
 
