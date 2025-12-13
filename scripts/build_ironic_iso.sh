@@ -109,13 +109,25 @@ EFI_BOOT_DIR="${EFI_STAGING}/EFI/BOOT"
 mkdir -p "${EFI_BOOT_DIR}"
 
 cat > "${EFI_BOOT_DIR}/grub.cfg" <<'EOF'
-search --no-floppy --file /boot/vmlinuz --set=root
+# Try to locate the kernel - check root first (for Ironic on-the-fly), then /boot/
+search --no-floppy --file /vmlinuz --set=root
+if [ -z "$root" ]; then
+  search --no-floppy --file /boot/vmlinuz --set=root
+fi
+
 set default=0
 set timeout=5
 
 menuentry "Ironic Python Agent (UEFI)" {
-  linux /boot/vmlinuz console=tty0 console=ttyS0,115200n8
-  initrd /boot/initrd.img
+  # Try root directory first (Ironic on-the-fly ISO creation)
+  if [ -f /vmlinuz ]; then
+    linux /vmlinuz console=tty0 console=ttyS0,115200n8
+    initrd /initrd
+  # Fallback to /boot/ directory (standard ISO structure)
+  elif [ -f /boot/vmlinuz ]; then
+    linux /boot/vmlinuz console=tty0 console=ttyS0,115200n8
+    initrd /boot/initrd.img
+  fi
 }
 EOF
 
