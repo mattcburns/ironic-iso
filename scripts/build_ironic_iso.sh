@@ -167,5 +167,11 @@ fi
 
 xorriso -as mkisofs "${XORRISO_ARGS[@]}"
 
+# Copy kernel and initramfs to artifacts directory for publishing
+cp "${IPA_KERNEL}" "${ARTIFACTS_DIR}/${IMAGE_NAME}.kernel"
+cp "${IPA_RAMDISK}" "${ARTIFACTS_DIR}/${IMAGE_NAME}.initramfs"
+
 echo "Build complete. ISO at: ${ISO_OUTPUT}"
+echo "Kernel at: ${ARTIFACTS_DIR}/${IMAGE_NAME}.kernel"
+echo "Initramfs at: ${ARTIFACTS_DIR}/${IMAGE_NAME}.initramfs"
 ls -lh "${ARTIFACTS_DIR}"

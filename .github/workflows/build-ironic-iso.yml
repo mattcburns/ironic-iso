@@ -70,7 +70,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ironic-centos9-iso
-          path: artifacts/*.iso
+          path: |
+            artifacts/*.iso
+            artifacts/*.kernel
+            artifacts/*.initramfs
           retention-days: 3
 
       - name: Upload logs and build outputs (optional)
@@ -101,6 +104,9 @@ jobs:
       - name: Create GitHub Release and upload ISO
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/*.iso
+          files: |
+            dist/*.iso
+            dist/*.kernel
+            dist/*.initramfs
           draft: false
           prerelease: false
