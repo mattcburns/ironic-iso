@@ -21,10 +21,15 @@ export DIB_DEBUG_TRACE=1
 export DIB_RELEASE
 export DIB_CLOUD_IMAGES=""
 
+# Set ELEMENTS_PATH to include our custom elements directory
+# This allows diskimage-builder to find our custom elements
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export ELEMENTS_PATH="${REPO_ROOT}/elements${ELEMENTS_PATH:+:${ELEMENTS_PATH}}"
+
 # Extra elements to include in addition to the default ipa ramdisk elements
 # Do NOT include 'ironic-python-agent-ramdisk' here; the builder adds it.
 # Space-separated list, e.g. "element-manifest some-driver". Can be empty.
-ELEMENTS_EXTRA="element-manifest"
+ELEMENTS_EXTRA="element-manifest ironic-root-password"
 
 # Build the ramdisk + kernel using ironic-python-agent-builder
 # Note: This creates a kernel and ramdisk; we then wrap into an ISO.
