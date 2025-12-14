@@ -56,6 +56,7 @@ jobs:
       - name: Build Ironic ISO (Secure Boot via shim)
         env:
           UEFI_METHOD: shim
+          DIB_NO_TMPFS: 1
         run: |
           chmod +x scripts/build_ironic_iso.sh
           bash scripts/build_ironic_iso.sh
