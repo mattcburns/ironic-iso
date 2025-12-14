@@ -4,36 +4,33 @@ set -euxo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${REPO_ROOT}"
 
-# System dependencies
-sudo apt-get update
-sudo apt-get install -y \
-  qemu-utils \
-  kpartx \
-  debootstrap \
-  squashfs-tools \
-  xorriso \
-  syslinux \
-  isolinux \
-  grub-pc-bin \
-  grub-efi-amd64-bin \
-  mtools \
-  dosfstools \
-  python3-venv \
-  python3-dev \
+# System dependencies (CentOS Stream 9)
+sudo dnf -y install \
+  python3 \
+  python3-pip \
+  python3-devel \
   gcc \
   make \
-  libffi-dev \
-  libssl-dev
+  libffi-devel \
+  openssl-devel \
+  qemu-img \
+  kpartx \
+  squashfs-tools \
+  xorriso \
+  mtools \
+  dosfstools \
+  shim-x64 \
+  grub2-efi-x64
 
 # Python venv
 if [[ ! -d .venv ]]; then
   python3 -m venv .venv
 fi
 source .venv/bin/activate
-python -m pip install --upgrade pip
-pip install diskimage-builder ironic-python-agent-builder
+python3 -m pip install --upgrade pip
+python3 -m pip install diskimage-builder ironic-python-agent-builder
 
 chmod +x scripts/build_ironic_iso.sh
 
-# Run the build
-scripts/build_ironic_iso.sh
+# Run the build with signed shim/grub
+UEFI_METHOD=shim scripts/build_ironic_iso.sh

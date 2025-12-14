@@ -6,15 +6,15 @@ GitHub Actions–based pipeline to build custom OpenStack Ironic images in ISO f
 - `diskimage-builder`
 - CentOS Stream 9 as the base OS
 
-The resulting ISO is hybrid and supports both BIOS/legacy (isolinux) and UEFI (GRUB) boot modes.
+The resulting ISO supports UEFI boot mode only (via GRUB).
 
 ## GitHub Actions Workflow
 
 The workflow:
 
-- Installs Python and dependencies on `ubuntu-latest`
+- Runs inside a `CentOS Stream 9` container for Secure Boot support
 - Installs `diskimage-builder` and `ironic-python-agent-builder`
-- Builds a CentOS Stream 9 based Ironic ISO
+- Builds a CentOS Stream 9 based Ironic ISO with `UEFI_METHOD=shim`
 - Uploads the resulting ISO as a build artifact
 
 ## How to trigger
@@ -51,24 +51,61 @@ git push origin v0.1.0
 - The workflow will publish a Release for that tag and attach the built ISO.
 - Navigate to **Releases** in the repo to download the asset.
 
-## Local dry run
+## Local dry run (CentOS Stream 9)
 
-To test the build locally on a Debian/Ubuntu-like system, run:
+Run on a CentOS Stream 9 system:
 
 ```bash
 ./scripts/local_dry_run.sh
 ```
 
-This will create a Python virtualenv, install the required packages, and build the ISO into an `artifacts/` directory.
+This will create a Python virtualenv, install CentOS packages (via `dnf`), and build the ISO into an `artifacts/` directory using signed shim/grub.
 
-### EFI/UEFI dependencies
+**Not running CentOS?** Use a container:
 
-Hybrid ISO creation requires GRUB for UEFI and FAT tooling for the embedded EFI image. The `local_dry_run.sh` script installs:
+```bash
+podman run --rm -it -v $(pwd):/workspace:z -w /workspace \
+  quay.io/centos/centos:stream9 \
+  bash -c "dnf install -y sudo git && ./scripts/local_dry_run.sh"
+```
 
-- `grub-efi-amd64-bin` and `grub-pc-bin` (for `grub-mkstandalone`)
-- `mtools` and `dosfstools` (for creating the FAT EFI image)
+(Replace `podman` with `docker` if preferred.)
 
-On RHEL/CentOS/Fedora, install the equivalents (e.g., `grub2-efi-x64`, `grub2-pc`, `mtools`, `dosfstools`).
+### UEFI dependencies
+
+UEFI ISO creation requires a bootloader and FAT tooling for the embedded EFI image. On CentOS Stream 9:
+
+- `shim-x64` and `grub2-efi-x64` (signed bootloaders for Secure Boot)
+- `mtools` and `dosfstools` (FAT image creation)
+## Secure Boot (CentOS Stream 9)
+
+This repo supports building an ESP using CentOS-signed `shim` + `grub`, enabling UEFI Secure Boot.
+
+- On a CentOS 9 host/container:
+
+```bash
+sudo dnf install -y dosfstools mtools shim-x64 grub2-efi-x64
+```
+
+- Option A: Build a standalone ESP image only
+
+```bash
+scripts/build_centos9_esp.sh
+# Outputs esp-centos9.img (config at EFI/BOOT/grub.cfg)
+```
+
+- Option B: Integrate into full ISO build
+
+```bash
+UEFI_METHOD=shim \
+SRC_SHIM=/boot/efi/EFI/centos/shimx64.efi \
+SRC_GRUB=/boot/efi/EFI/centos/grubx64.efi \
+./scripts/build_ironic_iso.sh
+```
+
+Notes:
+- When `UEFI_METHOD=shim`, the script copies signed `shimx64.efi` → `EFI/BOOT/BOOTX64.EFI` and `grubx64.efi` → `EFI/BOOT/grubx64.efi`, and writes `grub.cfg` to both `EFI/BOOT/` and `EFI/centos/` for robustness.
+- When `UEFI_METHOD=standalone` (default), the build uses `grub-mkstandalone` to produce `BOOTX64.EFI` and a minimal `grub.cfg` in `EFI/BOOT/`.
 
 ## Root Password
 

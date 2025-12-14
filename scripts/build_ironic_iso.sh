@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
 set -euxo pipefail
 
-# Default configuration; can be overridden by env vars.
+# Configuration (override via env vars if needed)
 : "${BASE_DISTRO:=centos}"
 : "${DIB_RELEASE:=9-stream}"          # CentOS Stream 9
 : "${IMAGE_NAME:=ironic-centos9-ipa}"
 : "${ARTIFACTS_DIR:=artifacts}"
 : "${EFI_IMG_MB:=32}"                 # Size of the FAT EFI image
+: "${UEFI_METHOD:=standalone}"        # 'shim' or 'standalone'
+# Optional overrides for shim/grub on CentOS when UEFI_METHOD=shim
+: "${SRC_SHIM:=/boot/efi/EFI/centos/shimx64.efi}"
+: "${SRC_GRUB:=/boot/efi/EFI/centos/grubx64.efi}"
 
 mkdir -p "${ARTIFACTS_DIR}"
 
@@ -16,28 +20,22 @@ echo "Image name:        ${IMAGE_NAME}"
 echo "Artifacts dir:     ${ARTIFACTS_DIR}"
 echo "EFI image size:    ${EFI_IMG_MB}MiB"
 
-# Ensure required env vars for diskimage-builder are set
+# diskimage-builder settings
 export DIB_DEBUG_TRACE=1
 export DIB_RELEASE
 export DIB_CLOUD_IMAGES=""
 
-# Set ELEMENTS_PATH to include our custom elements directory
-# This allows diskimage-builder to find our custom elements
+# Include repo elements in ELEMENTS_PATH
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export ELEMENTS_PATH="${REPO_ROOT}/elements${ELEMENTS_PATH:+:${ELEMENTS_PATH}}"
 
-# Extra elements to include in addition to the default ipa ramdisk elements
-# Do NOT include 'ironic-python-agent-ramdisk' here; the builder adds it.
-# Space-separated list, e.g. "element-manifest some-driver". Can be empty.
+# Extra elements for the IPA ramdisk
 ELEMENTS_EXTRA="element-manifest ironic-root-password"
 
-# Build the ramdisk + kernel using ironic-python-agent-builder
-# Note: This creates a kernel and ramdisk; we then wrap into an ISO.
+# Build IPA kernel and ramdisk
 IPA_OUTPUT_DIR="$(pwd)/ipa-build"
 mkdir -p "${IPA_OUTPUT_DIR}"
 
-# The -o flag expects an output PREFIX (file path), not a directory.
-# We'll produce files like: ${IPA_OUTPUT_DIR}/${IMAGE_NAME}.kernel and .initramfs
 IPA_PREFIX="${IPA_OUTPUT_DIR}/${IMAGE_NAME}"
 
 echo "Building ironic-python-agent ramdisk..."
@@ -66,44 +64,18 @@ if [[ ! -f "${IPA_KERNEL}" || ! -f "${IPA_RAMDISK}" ]]; then
     exit 1
 fi
 
-# Wrap kernel+ramdisk into a hybrid (BIOS + UEFI) ISO
+# Create UEFI-only ISO
 ISO_OUTPUT="${ARTIFACTS_DIR}/${IMAGE_NAME}.iso"
 
 echo "Creating ISO: ${ISO_OUTPUT}"
 WORKDIR="$(pwd)/iso-work"
-mkdir -p "${WORKDIR}/isolinux"
 mkdir -p "${WORKDIR}/boot"
 mkdir -p "${WORKDIR}/EFI"
 
 cp "${IPA_KERNEL}" "${WORKDIR}/boot/vmlinuz"
 cp "${IPA_RAMDISK}" "${WORKDIR}/boot/initrd.img"
 
-cat > "${WORKDIR}/isolinux/isolinux.cfg" <<EOF
-DEFAULT ipa
-LABEL ipa
-  KERNEL /boot/vmlinuz
-  APPEND initrd=/boot/initrd.img console=tty0 console=ttyS0,115200n8
-TIMEOUT 50
-PROMPT 0
-EOF
-
-# Basic isolinux bootloader files are typically provided by syslinux
-# On Ubuntu, they live under /usr/lib/ISOLINUX or similar.
-ISOLINUX_BIN="/usr/lib/ISOLINUX/isolinux.bin"
-if [[ ! -f "${ISOLINUX_BIN}" ]]; then
-    echo "ERROR: isolinux.bin not found at ${ISOLINUX_BIN}"
-    echo "Check syslinux/isolinux installation path on this runner."
-    exit 1
-fi
-cp "${ISOLINUX_BIN}" "${WORKDIR}/isolinux/isolinux.bin"
-
-ISOHYBRID_MBR="/usr/lib/ISOLINUX/isohdpfx.bin"
-if [[ ! -f "${ISOHYBRID_MBR}" ]]; then
-    echo "WARNING: isohdpfx.bin not found at ${ISOHYBRID_MBR}; ISO will still build but hybrid MBR may be missing"
-    ISOHYBRID_MBR=""
-fi
-
-# Build a minimal GRUB UEFI image and embed the boot config
+# Build UEFI boot files
 EFI_STAGING="${WORKDIR}/efi-staging"
 EFI_BOOT_DIR="${EFI_STAGING}/EFI/BOOT"
 mkdir -p "${EFI_BOOT_DIR}"
@@ -113,49 +85,82 @@ set default=0
 set timeout=5
 
 menuentry "Ironic Python Agent (UEFI)" {
-  # ISO filesystem is typically (cd0); load kernel/initrd from there
   set root=(cd0)
-
   if [ -f /vmlinuz -a -f /initrd ]; then
     linux /vmlinuz console=tty0 console=ttyS0,115200n8
     initrd /initrd
   elif [ -f /boot/vmlinuz -a -f /boot/initrd.img ]; then
     linux /boot/vmlinuz console=tty0 console=ttyS0,115200n8
     initrd /boot/initrd.img
-  else
-    echo "Kernel/initrd not found on ISO (checked / and /boot)"
-    sleep 5
   fi
 }
 EOF
 
-if ! command -v grub-mkstandalone >/dev/null 2>&1; then
-    echo "ERROR: grub-mkstandalone not found; install grub-efi-amd64-bin (Debian/Ubuntu) or grub2-efi-x64 (RHEL/CentOS)."
+# Build using signed shim+grub (CentOS) when requested, else standalone GRUB
+if [[ "${UEFI_METHOD}" == "shim" ]]; then
+  # Resolve shim/grub paths from common locations if not present
+  resolve_efi_bin() {
+    local name="$1"; shift
+    local candidates=("$@")
+    for p in "${candidates[@]}"; do
+      if [[ -f "$p" ]]; then
+        echo "$p"
+        return 0
+      fi
+    done
+    return 1
+  }
+  # Candidates for CentOS/RHEL locations (container-friendly)
+  if [[ ! -f "${SRC_SHIM}" ]]; then
+    SRC_SHIM=$(resolve_efi_bin shimx64.efi \
+      /boot/efi/EFI/centos/shimx64.efi \
+      /usr/share/efi/EFI/centos/shimx64.efi \
+      /usr/share/efi/EFI/BOOT/BOOTX64.EFI \
+      /usr/lib/shim/shimx64.efi \
+      /usr/lib64/efi/shimx64.efi) || true
+  fi
+  if [[ ! -f "${SRC_GRUB}" ]]; then
+    SRC_GRUB=$(resolve_efi_bin grubx64.efi \
+      /boot/efi/EFI/centos/grubx64.efi \
+      /usr/share/efi/EFI/centos/grubx64.efi \
+      /usr/share/grub2/efi/grubx64.efi \
+      /usr/lib/grub/x86_64-efi/grubx64.efi \
+      /usr/lib64/efi/grubx64.efi) || true
+  fi
+  if [[ -z "${SRC_SHIM}" || -z "${SRC_GRUB}" || ! -f "${SRC_SHIM}" || ! -f "${SRC_GRUB}" ]]; then
+    echo "ERROR: shim/grub not found. On CentOS: dnf install -y shim-x64 grub2-efi-x64"
+    echo "Checked: SRC_SHIM=${SRC_SHIM:-unset} SRC_GRUB=${SRC_GRUB:-unset}"
     exit 1
-fi
-
-GRUB_STANDALONE="${EFI_BOOT_DIR}/BOOTX64.EFI"
-# Embed a bootstrap config that chainloads the external EFI/BOOT/grub.cfg on the ESP
-cat > "${EFI_BOOT_DIR}/bootstrap.cfg" <<'EOF'
+  fi
+  # Place signed loaders
+  install -m 0644 "${SRC_SHIM}" "${EFI_BOOT_DIR}/BOOTX64.EFI"
+  install -m 0644 "${SRC_GRUB}" "${EFI_BOOT_DIR}/grubx64.efi"
+else
+    # Support both Debian and RHEL names for mkstandalone
+    MKSTANDALONE_BIN="$(command -v grub-mkstandalone || command -v grub2-mkstandalone || true)"
+    if [[ -z "${MKSTANDALONE_BIN}" ]]; then
+      echo "ERROR: grub-mkstandalone/grub2-mkstandalone not found."
+      echo "On Debian/Ubuntu: install grub-efi-amd64-bin. On CentOS/RHEL: grub2-efi-x64."
+      exit 1
+    fi
+  GRUB_STANDALONE="${EFI_BOOT_DIR}/BOOTX64.EFI"
+  cat > "${EFI_BOOT_DIR}/bootstrap.cfg" <<'EOF'
 set timeout=0
-# Load external config from ESP so Ironic can inject kernel params
 if [ -f ($root)/EFI/BOOT/grub.cfg ]; then
   configfile ($root)/EFI/BOOT/grub.cfg
 else
   search --no-floppy --file /EFI/BOOT/grub.cfg --set=espdev
   if [ -n "$espdev" ]; then
     configfile ($espdev)/EFI/BOOT/grub.cfg
-  else
-    echo "EFI/BOOT/grub.cfg not found"
   fi
 fi
 EOF
-
-grub-mkstandalone \
-  -O x86_64-efi \
-  -o "${GRUB_STANDALONE}" \
-  --compress=xz \
-  "boot/grub/grub.cfg=${EFI_BOOT_DIR}/bootstrap.cfg"
+  "${MKSTANDALONE_BIN}" \
+    -O x86_64-efi \
+    -o "${GRUB_STANDALONE}" \
+    --compress=xz \
+    "boot/grub/grub.cfg=${EFI_BOOT_DIR}/bootstrap.cfg"
+fi
 
 EFI_IMG="${WORKDIR}/EFI/efiboot.img"
 for tool in mkfs.vfat mmd mcopy; do
@@ -166,34 +171,26 @@ for tool in mkfs.vfat mmd mcopy; do
 done
 
 truncate -s "${EFI_IMG_MB}M" "${EFI_IMG}"
-mkfs.vfat "${EFI_IMG}"
+mkfs.vfat -F 12 "${EFI_IMG}"
 mmd -i "${EFI_IMG}" ::/EFI ::/EFI/BOOT
-mcopy -i "${EFI_IMG}" "${GRUB_STANDALONE}" ::/EFI/BOOT/BOOTX64.EFI
 mcopy -i "${EFI_IMG}" "${EFI_BOOT_DIR}/grub.cfg" ::/EFI/BOOT/grub.cfg
-# Note for OpenStack Ironic:
-# Set grub_config_path=EFI/BOOT/grub.cfg so Ironic can inject kernel params
-
-# Assemble the hybrid ISO: isolinux for BIOS, GRUB for UEFI
-XORRISO_ARGS=(
-  -o "${ISO_OUTPUT}"
-  -b isolinux/isolinux.bin
-  -c isolinux/boot.cat
-  -no-emul-boot
-  -boot-load-size 4
-  -boot-info-table
-  -eltorito-alt-boot
-  -e EFI/efiboot.img
-  -no-emul-boot
-  -isohybrid-gpt-basdat
-  -V "IRONIC_IPA_ISO"
-  "${WORKDIR}"
-)
-
-if [[ -n "${ISOHYBRID_MBR}" ]]; then
-  XORRISO_ARGS=( -isohybrid-mbr "${ISOHYBRID_MBR}" "${XORRISO_ARGS[@]}" )
+if [[ "${UEFI_METHOD}" == "shim" ]]; then
+  mcopy -i "${EFI_IMG}" "${EFI_BOOT_DIR}/BOOTX64.EFI" ::/EFI/BOOT/BOOTX64.EFI
+  mcopy -i "${EFI_IMG}" "${EFI_BOOT_DIR}/grubx64.efi" ::/EFI/BOOT/grubx64.efi
+  # Also place config in CentOS path for robustness
+  mmd -i "${EFI_IMG}" ::/EFI/centos || true
+  mcopy -i "${EFI_IMG}" "${EFI_BOOT_DIR}/grub.cfg" ::/EFI/centos/grub.cfg
+else
+  mcopy -i "${EFI_IMG}" "${EFI_BOOT_DIR}/BOOTX64.EFI" ::/EFI/BOOT/BOOTX64.EFI
 fi
 
-xorriso -as mkisofs "${XORRISO_ARGS[@]}"
+# Assemble UEFI-only ISO
+xorriso -as mkisofs \
+  -o "${ISO_OUTPUT}" \
+  -e EFI/efiboot.img \
+  -no-emul-boot \
+  -V "IRONIC_IPA_ISO" \
+  "${WORKDIR}"
 
 # Verify UEFI ESP image was created
 if [[ ! -f "${EFI_IMG}" ]]; then
