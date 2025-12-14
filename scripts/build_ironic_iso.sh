@@ -113,49 +113,26 @@ set default=0
 set timeout=5
 
 menuentry "Ironic Python Agent (UEFI)" {
-  # Set root to the filesystem that contains the kernel, not the ESP
-  search --no-floppy --file /vmlinuz --set=bootdev || true
-  if [ -z "$bootdev" ]; then
-    search --no-floppy --file /boot/vmlinuz --set=bootdev || true
-  fi
-  if [ -z "$bootdev" ]; then
-    search --no-floppy --file /kernel --set=bootdev || true
-  fi
-  if [ -n "$bootdev" ]; then
-    set root=$bootdev
-  fi
-
-  # Discover kernel and initrd across common locations on the ISO
-  set kernel=""
-  for k in /vmlinuz /kernel /boot/vmlinuz /boot/kernel; do
-    if [ -f $k ]; then
-      set kernel=$k
-      break
+  # Files are in /EFI/BOOT/ subdirectory of the ESP
+  # Try standard names first, then fallback names
+  if [ -f /EFI/BOOT/vmlinuz ]; then
+    linux /EFI/BOOT/vmlinuz console=tty0 console=ttyS0,115200n8
+    if [ -f /EFI/BOOT/initrd.img ]; then
+      initrd /EFI/BOOT/initrd.img
+    elif [ -f /EFI/BOOT/initrd ]; then
+      initrd /EFI/BOOT/initrd
     fi
-  done
-
-  set initrd_img=""
-  for r in /initrd /initrd.img /initramfs /initramfs.img /boot/initrd /boot/initrd.img /boot/initramfs /boot/initramfs.img; do
-    if [ -f $r ]; then
-      set initrd_img=$r
-      break
+  elif [ -f /EFI/BOOT/kernel ]; then
+    linux /EFI/BOOT/kernel console=tty0 console=ttyS0,115200n8
+    if [ -f /EFI/BOOT/initramfs.img ]; then
+      initrd /EFI/BOOT/initramfs.img
+    elif [ -f /EFI/BOOT/initramfs ]; then
+      initrd /EFI/BOOT/initramfs
     fi
-  done
-
-  if [ -z "$kernel" ]; then
-    echo "Kernel not found (looked for /vmlinuz /kernel /boot/vmlinuz /boot/kernel)"
+  else
+    echo "Kernel not found in /EFI/BOOT/"
     sleep 5
-    return
   fi
-
-  if [ -z "$initrd_img" ]; then
-    echo "Initrd not found (looked for /initrd[.img] /initramfs[.img] and /boot equivalents)"
-    sleep 5
-    return
-  fi
-
-  linux $kernel console=tty0 console=ttyS0,115200n8
-  initrd $initrd_img
 }
 EOF
 
@@ -200,6 +177,11 @@ mkfs.vfat "${EFI_IMG}"
 mmd -i "${EFI_IMG}" ::/EFI ::/EFI/BOOT
 mcopy -i "${EFI_IMG}" "${GRUB_STANDALONE}" ::/EFI/BOOT/BOOTX64.EFI
 mcopy -i "${EFI_IMG}" "${EFI_BOOT_DIR}/grub.cfg" ::/EFI/BOOT/grub.cfg
+
+# Copy kernel and initrd into the ESP so GRUB can always find them
+# Both in /boot/ (for standard ISO) and /EFI/BOOT/ (for Ironic on-the-fly ISO creation)
+mcopy -i "${EFI_IMG}" "${IPA_KERNEL}" ::/EFI/BOOT/vmlinuz
+mcopy -i "${EFI_IMG}" "${IPA_RAMDISK}" ::/EFI/BOOT/initrd.img
 # Note for OpenStack Ironic:
 # Set grub_config_path=EFI/BOOT/grub.cfg so Ironic can inject kernel params
 
