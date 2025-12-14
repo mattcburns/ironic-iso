@@ -58,7 +58,8 @@ jobs:
         env:
           UEFI_METHOD: shim
           DIB_NO_TMPFS: 1
-          DIB_SUDO: /bin/true
+          DIB_SUDO: /usr/bin/env
+          SUDO: /usr/bin/env
         run: |
           chmod +x scripts/build_ironic_iso.sh
           bash scripts/build_ironic_iso.sh
