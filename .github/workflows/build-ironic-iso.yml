@@ -13,6 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: quay.io/centos/centos:stream9
+      options: --privileged
 
     env:
       BASE_DISTRO: centos
