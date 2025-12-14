@@ -113,10 +113,19 @@ set default=0
 set timeout=5
 
 menuentry "Ironic Python Agent (UEFI)" {
-  # Anchor root to ESP so relative paths work
-  search --no-floppy --file /EFI/BOOT/grub.cfg --set=root
+  # Set root to the filesystem that contains the kernel, not the ESP
+  search --no-floppy --file /vmlinuz --set=bootdev || true
+  if [ -z "$bootdev" ]; then
+    search --no-floppy --file /boot/vmlinuz --set=bootdev || true
+  fi
+  if [ -z "$bootdev" ]; then
+    search --no-floppy --file /kernel --set=bootdev || true
+  fi
+  if [ -n "$bootdev" ]; then
+    set root=$bootdev
+  fi
 
-  # Discover kernel and initrd across common locations
+  # Discover kernel and initrd across common locations on the ISO
   set kernel=""
   for k in /vmlinuz /kernel /boot/vmlinuz /boot/kernel; do
     if [ -f $k ]; then
