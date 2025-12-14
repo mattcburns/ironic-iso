@@ -6,7 +6,7 @@ set -euxo pipefail
 : "${DIB_RELEASE:=9-stream}"          # CentOS Stream 9
 : "${IMAGE_NAME:=ironic-centos9-ipa}"
 : "${ARTIFACTS_DIR:=artifacts}"
-: "${EFI_IMG_MB:=16}"                 # Size of the FAT EFI image
+: "${EFI_IMG_MB:=32}"                 # Size of the FAT EFI image
 
 mkdir -p "${ARTIFACTS_DIR}"
 
@@ -113,24 +113,17 @@ set default=0
 set timeout=5
 
 menuentry "Ironic Python Agent (UEFI)" {
-  # Files are in /EFI/BOOT/ subdirectory of the ESP
-  # Try standard names first, then fallback names
-  if [ -f /EFI/BOOT/vmlinuz ]; then
-    linux /EFI/BOOT/vmlinuz console=tty0 console=ttyS0,115200n8
-    if [ -f /EFI/BOOT/initrd.img ]; then
-      initrd /EFI/BOOT/initrd.img
-    elif [ -f /EFI/BOOT/initrd ]; then
-      initrd /EFI/BOOT/initrd
-    fi
-  elif [ -f /EFI/BOOT/kernel ]; then
-    linux /EFI/BOOT/kernel console=tty0 console=ttyS0,115200n8
-    if [ -f /EFI/BOOT/initramfs.img ]; then
-      initrd /EFI/BOOT/initramfs.img
-    elif [ -f /EFI/BOOT/initramfs ]; then
-      initrd /EFI/BOOT/initramfs
-    fi
+  # ISO filesystem is typically (cd0); load kernel/initrd from there
+  set root=(cd0)
+
+  if [ -f /vmlinuz -a -f /initrd ]; then
+    linux /vmlinuz console=tty0 console=ttyS0,115200n8
+    initrd /initrd
+  elif [ -f /boot/vmlinuz -a -f /boot/initrd.img ]; then
+    linux /boot/vmlinuz console=tty0 console=ttyS0,115200n8
+    initrd /boot/initrd.img
   else
-    echo "Kernel not found in /EFI/BOOT/"
+    echo "Kernel/initrd not found on ISO (checked / and /boot)"
     sleep 5
   fi
 }
@@ -177,11 +170,6 @@ mkfs.vfat "${EFI_IMG}"
 mmd -i "${EFI_IMG}" ::/EFI ::/EFI/BOOT
 mcopy -i "${EFI_IMG}" "${GRUB_STANDALONE}" ::/EFI/BOOT/BOOTX64.EFI
 mcopy -i "${EFI_IMG}" "${EFI_BOOT_DIR}/grub.cfg" ::/EFI/BOOT/grub.cfg
-
-# Copy kernel and initrd into the ESP so GRUB can always find them
-# Both in /boot/ (for standard ISO) and /EFI/BOOT/ (for Ironic on-the-fly ISO creation)
-mcopy -i "${EFI_IMG}" "${IPA_KERNEL}" ::/EFI/BOOT/vmlinuz
-mcopy -i "${EFI_IMG}" "${IPA_RAMDISK}" ::/EFI/BOOT/initrd.img
 # Note for OpenStack Ironic:
 # Set grub_config_path=EFI/BOOT/grub.cfg so Ironic can inject kernel params
 
