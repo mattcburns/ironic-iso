@@ -35,6 +35,7 @@ jobs:
       - name: Install system dependencies (CentOS 9)
         run: |
           dnf -y install \
+            git \
             qemu-img \
             kpartx \
             squashfs-tools \
