@@ -31,12 +31,12 @@ jobs:
       - name: Install system dependencies
         run: |
           dnf install -y \
-            qemu-utils \
+            qemu-img \
             kpartx \
             squashfs-tools \
             xorriso \
             syslinux \
-            isolinux \
+            syslinux-nonlinux \
             python3-devel \
             gcc \
             make \
