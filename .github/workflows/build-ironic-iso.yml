@@ -11,6 +11,9 @@ on:
 jobs:
   build-ironic-iso:
     runs-on: ubuntu-latest
+    container:
+      image: quay.io/centos/centos:stream9
+      options: --privileged
 
     env:
       BASE_DISTRO: centos
@@ -22,44 +25,66 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
       - name: Install system dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            qemu-utils \
+          dnf install -y \
+            git \
+            qemu-img \
             kpartx \
-            debootstrap \
             squashfs-tools \
             xorriso \
             syslinux \
-            isolinux \
-            python3-dev \
+            syslinux-nonlinux \
+            python3-devel \
             gcc \
             make \
-            libffi-dev \
-            libssl-dev \
-            grub-pc-bin \
-            grub-efi-amd64-bin \
+            libffi-devel \
+            openssl-devel \
+            python3-pip \
+            dosfstools \
             mtools \
-            dosfstools
+            shim-x64 \
+            grub2-efi-x64
+
+      - name: Create sudo wrapper for container
+        run: |
+          cat > /usr/local/bin/sudo <<'SUDO_WRAPPER'
+          #!/bin/bash
+          # No-op sudo wrapper for container (already running as root)
+          # Strip common sudo flags and execute the remaining command
+          while [[ $# -gt 0 ]]; do
+            case "$1" in
+              -E|-H|-n|-v|-k|-l|-S|-p|-r|-t|-u|-g|-h)
+                # These flags may or may not have arguments
+                case "$1" in
+                  -p|-r|-t|-u|-g|-h) shift ;;  # These take an argument
+                esac
+                shift ;;
+              -*)
+                # Other flags without arguments
+                shift ;;
+              *)
+                # First non-flag argument is the start of the actual command
+                break ;;
+            esac
+          done
+          # Execute the remaining command
+          exec "$@"
+          SUDO_WRAPPER
+          chmod +x /usr/local/bin/sudo
 
       - name: Upgrade pip and install Python packages
         run: |
-          python -m pip install --upgrade pip
-          pip install \
+          python3 -m pip install --upgrade pip
+          pip3 install \
             diskimage-builder \
             ironic-python-agent-builder
 
       - name: Show versions
         run: |
-          python --version
-          pip show diskimage-builder || true
-          pip show ironic-python-agent-builder || true
+          python3 --version
+          pip3 show diskimage-builder || true
+          pip3 show ironic-python-agent-builder || true
 
       - name: Build Ironic ISO
         run: |
@@ -74,6 +99,7 @@ jobs:
             artifacts/*.iso
             artifacts/*.kernel
             artifacts/*.initramfs
+            artifacts/*.img
           retention-days: 3
 
       - name: Upload logs and build outputs (optional)
@@ -108,5 +134,6 @@ jobs:
             dist/*.iso
             dist/*.kernel
             dist/*.initramfs
+            dist/*.img
           draft: false
           prerelease: false

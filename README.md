@@ -12,10 +12,12 @@ The resulting ISO is hybrid and supports both BIOS/legacy (isolinux) and UEFI (G
 
 The workflow:
 
-- Installs Python and dependencies on `ubuntu-latest`
-- Installs `diskimage-builder` and `ironic-python-agent-builder`
-- Builds a CentOS Stream 9 based Ironic ISO
-- Uploads the resulting ISO as a build artifact
+- Runs in a **privileged** CentOS Stream 9 container (needed for tmpfs mounts during image build)
+- Installs system dependencies via `dnf` (git, syslinux/syslinux-nonlinux, shim/grub, mtools/dosfstools, python3)
+- Installs `diskimage-builder` and `ironic-python-agent-builder` with `python3`/`pip3`
+- Builds a CentOS Stream 9 based Ironic ISO with a hybrid BIOS/UEFI bootloader
+- Builds an ESP (EFI System Partition) image using CentOS-provided shim and GRUB
+- Uploads the ISO, kernel, initramfs, and ESP image as build artifacts
 
 ## How to trigger
 
@@ -37,7 +39,7 @@ There are two options:
 
 - Go to the **Actions** tab
 - Open the latest run of "Build Ironic ISO"
-- Download the artifact named `ironic-centos9-iso` (contains `*.iso`)
+- Download the artifact named `ironic-centos9-iso` (contains `*.iso`, `*.kernel`, `*.initramfs`, and `*.img` files)
 
 2) From a GitHub Release (shareable permalink)
 
@@ -53,7 +55,7 @@ git push origin v0.1.0
 
 ## Local dry run
 
-To test the build locally on a Debian/Ubuntu-like system, run:
+To test the build locally on a CentOS 9 Stream system, run:
 
 ```bash
 ./scripts/local_dry_run.sh
@@ -61,14 +63,22 @@ To test the build locally on a Debian/Ubuntu-like system, run:
 
 This will create a Python virtualenv, install the required packages, and build the ISO into an `artifacts/` directory.
 
-### EFI/UEFI dependencies
+**Note:** The build script expects to run on CentOS 9 Stream (or compatible) as it requires access to CentOS-provided EFI files at `/boot/efi/EFI/centos/`.
 
-Hybrid ISO creation requires GRUB for UEFI and FAT tooling for the embedded EFI image. The `local_dry_run.sh` script installs:
+The build mounts tmpfs/loop devices; run as root or via `sudo`, or inside a privileged CentOS Stream 9 container. On CentOS, `isolinux.bin`/`isohdpfx.bin` come from the `syslinux`/`syslinux-nonlinux` packages under `/usr/share/syslinux/`.
 
-- `grub-efi-amd64-bin` and `grub-pc-bin` (for `grub-mkstandalone`)
-- `mtools` and `dosfstools` (for creating the FAT EFI image)
+### EFI/UEFI and ESP image dependencies
 
-On RHEL/CentOS/Fedora, install the equivalents (e.g., `grub2-efi-x64`, `grub2-pc`, `mtools`, `dosfstools`).
+The build process creates:
+1. A hybrid ISO with BIOS (isolinux) and UEFI (GRUB) boot support
+2. A separate ESP (EFI System Partition) image using CentOS-provided shim and GRUB binaries
+
+Required packages (automatically installed by the GitHub Actions workflow and `local_dry_run.sh`):
+
+- `grub2-efi-x64` and `grub2-pc` (for GRUB)
+- `shim-x64` (for secure boot support)
+- `mtools` and `dosfstools` (for creating FAT EFI/ESP images)
+- `syslinux` and `syslinux-nonlinux` (for `isolinux.bin`/`isohdpfx.bin`)
 
 ## Root Password
 

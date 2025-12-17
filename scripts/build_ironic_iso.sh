@@ -88,62 +88,42 @@ PROMPT 0
 EOF
 
 # Basic isolinux bootloader files are typically provided by syslinux
-# On Ubuntu, they live under /usr/lib/ISOLINUX or similar.
-ISOLINUX_BIN="/usr/lib/ISOLINUX/isolinux.bin"
+# On CentOS/RHEL, they live under /usr/share/syslinux
+ISOLINUX_BIN="/usr/share/syslinux/isolinux.bin"
 if [[ ! -f "${ISOLINUX_BIN}" ]]; then
     echo "ERROR: isolinux.bin not found at ${ISOLINUX_BIN}"
-    echo "Check syslinux/isolinux installation path on this runner."
+    echo "Check syslinux installation path on this runner."
     exit 1
 fi
 cp "${ISOLINUX_BIN}" "${WORKDIR}/isolinux/isolinux.bin"
 
-ISOHYBRID_MBR="/usr/lib/ISOLINUX/isohdpfx.bin"
+ISOHYBRID_MBR="/usr/share/syslinux/isohdpfx.bin"
 if [[ ! -f "${ISOHYBRID_MBR}" ]]; then
     echo "WARNING: isohdpfx.bin not found at ${ISOHYBRID_MBR}; ISO will still build but hybrid MBR may be missing"
     ISOHYBRID_MBR=""
 fi
 
-# Build a minimal GRUB UEFI image and embed the boot config
-EFI_STAGING="${WORKDIR}/efi-staging"
-EFI_BOOT_DIR="${EFI_STAGING}/EFI/BOOT"
-mkdir -p "${EFI_BOOT_DIR}"
+# Build ESP image
+EFI_IMG="${ARTIFACTS_DIR}/esp.img"
+echo "Building ESP image..."
 
-cat > "${EFI_BOOT_DIR}/grub.cfg" <<'EOF'
-search --no-floppy --file /boot/vmlinuz --set=root
-set default=0
-set timeout=5
+# Paths for CentOS 9 Stream packages
+SRC_SHIM="/boot/efi/EFI/centos/shimx64.efi"
+SRC_GRUB="/boot/efi/EFI/centos/grubx64.efi"
 
-menuentry "Ironic Python Agent (UEFI)" {
-  linux /boot/vmlinuz console=tty0 console=ttyS0,115200n8
-  initrd /boot/initrd.img
-}
-EOF
+dd if=/dev/zero of="${EFI_IMG}" bs=1M count=16 status=none
+mkfs.msdos -F 12 -n 'ESP_IMAGE' "${EFI_IMG}" > /dev/null
+mmd -i "${EFI_IMG}" ::EFI
+mmd -i "${EFI_IMG}" ::EFI/BOOT
+mcopy -i "${EFI_IMG}" "${SRC_SHIM}" ::EFI/BOOT/BOOTX64.EFI
+mcopy -i "${EFI_IMG}" "${SRC_GRUB}" ::EFI/BOOT/grubx64.efi
 
-if ! command -v grub-mkstandalone >/dev/null 2>&1; then
-    echo "ERROR: grub-mkstandalone not found; install grub-efi-amd64-bin (Debian/Ubuntu) or grub2-efi-x64 (RHEL/CentOS)."
-    exit 1
-fi
+echo "Done. Created ${EFI_IMG}"
 
-GRUB_STANDALONE="${EFI_BOOT_DIR}/BOOTX64.EFI"
-grub-mkstandalone \
-  -O x86_64-efi \
-  -o "${GRUB_STANDALONE}" \
-  --compress=xz \
-  "boot/grub/grub.cfg=${EFI_BOOT_DIR}/grub.cfg"
-
-EFI_IMG="${WORKDIR}/EFI/efiboot.img"
-for tool in mkfs.vfat mmd mcopy; do
-  if ! command -v "${tool}" >/dev/null 2>&1; then
-    echo "ERROR: ${tool} not found; install dosfstools (mkfs.vfat) and mtools (mmd/mcopy)."
-    exit 1
-  fi
-done
-
-truncate -s "${EFI_IMG_MB}M" "${EFI_IMG}"
-mkfs.vfat "${EFI_IMG}"
-mmd -i "${EFI_IMG}" ::/EFI ::/EFI/BOOT
-mcopy -i "${EFI_IMG}" "${GRUB_STANDALONE}" ::/EFI/BOOT/BOOTX64.EFI
-mcopy -i "${EFI_IMG}" "${EFI_BOOT_DIR}/grub.cfg" ::/EFI/BOOT/grub.cfg
+# Create a copy for the ISO's EFI boot image
+mkdir -p "${WORKDIR}/EFI"
+EFI_ISO_BOOT="${WORKDIR}/EFI/efiboot.img"
+cp "${EFI_IMG}" "${EFI_ISO_BOOT}"
 
 # Assemble the hybrid ISO: isolinux for BIOS, GRUB for UEFI
 XORRISO_ARGS=(
@@ -174,4 +154,5 @@ cp "${IPA_RAMDISK}" "${ARTIFACTS_DIR}/${IMAGE_NAME}.initramfs"
 echo "Build complete. ISO at: ${ISO_OUTPUT}"
 echo "Kernel at: ${ARTIFACTS_DIR}/${IMAGE_NAME}.kernel"
 echo "Initramfs at: ${ARTIFACTS_DIR}/${IMAGE_NAME}.initramfs"
+echo "ESP image at: ${EFI_IMG}"
 ls -lh "${ARTIFACTS_DIR}"
