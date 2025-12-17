@@ -11,6 +11,7 @@ on:
 jobs:
   build-ironic-iso:
     runs-on: ubuntu-latest
+    container: quay.io/centos/centos:stream9
 
     env:
       BASE_DISTRO: centos
@@ -29,24 +30,23 @@ jobs:
 
       - name: Install system dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
+          dnf install -y \
             qemu-utils \
             kpartx \
-            debootstrap \
             squashfs-tools \
             xorriso \
             syslinux \
             isolinux \
-            python3-dev \
+            python3-devel \
             gcc \
             make \
-            libffi-dev \
-            libssl-dev \
-            grub-pc-bin \
-            grub-efi-amd64-bin \
+            libffi-devel \
+            openssl-devel \
+            python3-pip \
+            dosfstools \
             mtools \
-            dosfstools
+            shim-x64 \
+            grub2-efi-x64
 
       - name: Upgrade pip and install Python packages
         run: |
@@ -74,6 +74,7 @@ jobs:
             artifacts/*.iso
             artifacts/*.kernel
             artifacts/*.initramfs
+            artifacts/*.img
           retention-days: 3
 
       - name: Upload logs and build outputs (optional)
@@ -108,5 +109,6 @@ jobs:
             dist/*.iso
             dist/*.kernel
             dist/*.initramfs
+            dist/*.img
           draft: false
           prerelease: false
