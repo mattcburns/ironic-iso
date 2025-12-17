@@ -88,16 +88,16 @@ PROMPT 0
 EOF
 
 # Basic isolinux bootloader files are typically provided by syslinux
-# On Ubuntu, they live under /usr/lib/ISOLINUX or similar.
-ISOLINUX_BIN="/usr/lib/ISOLINUX/isolinux.bin"
+# On CentOS/RHEL, they live under /usr/share/syslinux
+ISOLINUX_BIN="/usr/share/syslinux/isolinux.bin"
 if [[ ! -f "${ISOLINUX_BIN}" ]]; then
     echo "ERROR: isolinux.bin not found at ${ISOLINUX_BIN}"
-    echo "Check syslinux/isolinux installation path on this runner."
+    echo "Check syslinux installation path on this runner."
     exit 1
 fi
 cp "${ISOLINUX_BIN}" "${WORKDIR}/isolinux/isolinux.bin"
 
-ISOHYBRID_MBR="/usr/lib/ISOLINUX/isohdpfx.bin"
+ISOHYBRID_MBR="/usr/share/syslinux/isohdpfx.bin"
 if [[ ! -f "${ISOHYBRID_MBR}" ]]; then
     echo "WARNING: isohdpfx.bin not found at ${ISOHYBRID_MBR}; ISO will still build but hybrid MBR may be missing"
     ISOHYBRID_MBR=""
