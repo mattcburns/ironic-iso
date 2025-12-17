@@ -20,6 +20,9 @@ echo "EFI image size:    ${EFI_IMG_MB}MiB"
 export DIB_DEBUG_TRACE=1
 export DIB_RELEASE
 export DIB_CLOUD_IMAGES=""
+# These allow us to use NetworkManager in centos and disables DHCP
+export DIB_SIMPLE_INIT_NO_DHCP_FALLBACK=1
+export DIB_SIMPLE_INIT_NETWORKMANAGER=1
 
 # Set ELEMENTS_PATH to include our custom elements directory
 # This allows diskimage-builder to find our custom elements
