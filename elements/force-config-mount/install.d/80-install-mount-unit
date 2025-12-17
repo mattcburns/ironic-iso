@@ -1,8 +1,11 @@
 #!/bin/bash
-set -eux
+set -euxo pipefail
 
-# 1. Create the Mount Unit
-# This tells systemd: "If you see a disk labeled config-2, mount it here."
+# Create mountpoint and systemd directories
+mkdir -p /mnt/config
+mkdir -p /etc/systemd/system
+
+# Create the Mount Unit: mount label config-2 to /mnt/config if present
 cat <<EOF > /etc/systemd/system/mnt-config.mount
 [Unit]
 Description=Mount Ironic Config Drive
@@ -18,5 +21,17 @@ Options=ro,fail
 WantedBy=multi-user.target
 EOF
 
-# 3. Enable the mount unit
-systemctl enable mnt-config.mount
+# Enable the mount unit without systemctl (chroot-safe)
+mkdir -p /etc/systemd/system/multi-user.target.wants
+ln -sf ../mnt-config.mount /etc/systemd/system/multi-user.target.wants/mnt-config.mount
+
+# Ensure glean starts after the mount. Add drop-ins for common unit names.
+for unit in glean.service glean-early.service; do
+	dir="/etc/systemd/system/${unit}.d"
+	mkdir -p "$dir"
+	cat > "$dir/10-config-mount.conf" <<'OVRD'
+[Unit]
+After=mnt-config.mount
+Wants=mnt-config.mount
+OVRD
+done
