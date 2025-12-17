@@ -1,0 +1,33 @@
+#!/bin/bash
+set -eux
+
+# 1. Create the Mount Unit
+# This tells systemd: "If you see a disk labeled config-2, mount it here."
+cat <<EOF > /etc/systemd/system/mnt-config.mount
+[Unit]
+Description=Mount Ironic Config Drive
+# We want this to happen before Glean tries to read network data
+Before=glean.service
+ConditionPathExists=/dev/disk/by-label/config-2
+
+[Mount]
+What=/dev/disk/by-label/config-2
+Where=/mnt/config
+Type=auto
+Options=ro,fail
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# 2. Create the Drop-in for Glean
+# This tells Glean: "Do not start until /mnt/config is successfully mounted."
+mkdir -p /etc/systemd/system/glean.service.d
+cat <<EOF > /etc/systemd/system/glean.service.d/override.conf
+[Unit]
+Requires=mnt-config.mount
+After=mnt-config.mount
+EOF
+
+# 3. Enable the mount unit
+systemctl enable mnt-config.mount
