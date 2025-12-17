@@ -45,16 +45,16 @@ jobs:
 
       - name: Upgrade pip and install Python packages
         run: |
-          python -m pip install --upgrade pip
-          pip install \
+          python3 -m pip install --upgrade pip
+          pip3 install \
             diskimage-builder \
             ironic-python-agent-builder
 
       - name: Show versions
         run: |
-          python --version
-          pip show diskimage-builder || true
-          pip show ironic-python-agent-builder || true
+          python3 --version
+          pip3 show diskimage-builder || true
+          pip3 show ironic-python-agent-builder || true
 
       - name: Build Ironic ISO
         run: |
