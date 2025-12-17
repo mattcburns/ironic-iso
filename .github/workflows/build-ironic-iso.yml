@@ -43,6 +43,33 @@ jobs:
             shim-x64 \
             grub2-efi-x64
 
+      - name: Create sudo wrapper for container
+        run: |
+          cat > /usr/local/bin/sudo <<'SUDO_WRAPPER'
+          #!/bin/bash
+          # No-op sudo wrapper for container (already running as root)
+          # Strip common sudo flags and execute the remaining command
+          while [[ $# -gt 0 ]]; do
+            case "$1" in
+              -E|-H|-n|-v|-k|-l|-S|-p|-r|-t|-u|-g|-h)
+                # These flags may or may not have arguments
+                case "$1" in
+                  -p|-r|-t|-u|-g|-h) shift ;;  # These take an argument
+                esac
+                shift ;;
+              -*)
+                # Other flags without arguments
+                shift ;;
+              *)
+                # First non-flag argument is the start of the actual command
+                break ;;
+            esac
+          done
+          # Execute the remaining command
+          exec "$@"
+          SUDO_WRAPPER
+          chmod +x /usr/local/bin/sudo
+
       - name: Upgrade pip and install Python packages
         run: |
           python3 -m pip install --upgrade pip
