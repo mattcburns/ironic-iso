@@ -20,7 +20,11 @@ echo "EFI image size:    ${EFI_IMG_MB}MiB"
 export DIB_DEBUG_TRACE=1
 export DIB_RELEASE
 export DIB_CLOUD_IMAGES=""
-export DIB_CLOUD_INIT_DATASOURCES="OpenStack, ConfigDrive"
+export DIB_CLOUD_INIT_DATASOURCES="ConfigDrive, OpenStack"
+
+# Enable DHCP on all interfaces as fallback when config drive is not available
+# This is the default for CentOS/RHEL, but we set it explicitly for clarity
+export DIB_DHCP_NETWORK_MANAGER_AUTO=true
 
 # Set ELEMENTS_PATH to include our custom elements directory
 # This allows diskimage-builder to find our custom elements
