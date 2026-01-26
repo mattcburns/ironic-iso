@@ -26,6 +26,14 @@ export DIB_CLOUD_INIT_DATASOURCES="ConfigDrive, OpenStack"
 # This is the default for CentOS/RHEL, but we set it explicitly for clarity
 export DIB_DHCP_NETWORK_MANAGER_AUTO=true
 
+# Prevent kernel updates during the build process to avoid kernel/module version mismatch.
+# When dnf runs during the build, it may update the kernel-core package (which provides
+# /lib/modules/<version>) to a newer version than the kernel package (which provides
+# vmlinuz). By excluding kernel* packages from updates, we ensure the kernel and modules
+# stay in sync.
+export DIB_YUM_MINIMAL_CREATE_INTERFACES=1
+export DIB_DNF_EXTRA_ARGS="--exclude=kernel*"
+
 # Set ELEMENTS_PATH to include our custom elements directory
 # This allows diskimage-builder to find our custom elements
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -69,6 +77,58 @@ if [[ ! -f "${IPA_KERNEL}" || ! -f "${IPA_RAMDISK}" ]]; then
     echo "ERROR: IPA kernel or ramdisk not found in ${IPA_OUTPUT_DIR}"
     ls -l "${IPA_OUTPUT_DIR}" || true
     exit 1
+fi
+
+# Verify kernel and module versions match to prevent boot failures
+echo "Verifying kernel and module version consistency..."
+KERNEL_VERSION=$(file "${IPA_KERNEL}" | grep -oP 'version \K[0-9]+\.[0-9]+\.[0-9]+-[0-9]+' | head -1 || true)
+if [[ -z "${KERNEL_VERSION}" ]]; then
+    # Fallback: extract version from kernel binary strings
+    KERNEL_VERSION=$(strings "${IPA_KERNEL}" | grep -oP '^[0-9]+\.[0-9]+\.[0-9]+-[0-9]+\.el[0-9]+' | head -1 || true)
+fi
+
+# Extract initramfs and check module versions
+INITRD_CHECK_DIR=$(mktemp -d)
+trap "rm -rf ${INITRD_CHECK_DIR}" EXIT
+cd "${INITRD_CHECK_DIR}"
+
+# Handle potentially compressed initramfs (could be gzip, xz, zstd, or cpio)
+if file "${IPA_RAMDISK}" | grep -q "gzip"; then
+    zcat "${IPA_RAMDISK}" | cpio -id --quiet 2>/dev/null || true
+elif file "${IPA_RAMDISK}" | grep -q "XZ"; then
+    xzcat "${IPA_RAMDISK}" | cpio -id --quiet 2>/dev/null || true
+elif file "${IPA_RAMDISK}" | grep -q "Zstandard"; then
+    zstdcat "${IPA_RAMDISK}" | cpio -id --quiet 2>/dev/null || true
+else
+    cpio -id --quiet < "${IPA_RAMDISK}" 2>/dev/null || true
+fi
+
+MODULE_VERSIONS=$(ls -1 lib/modules/ 2>/dev/null || echo "")
+cd - > /dev/null
+
+if [[ -n "${MODULE_VERSIONS}" ]]; then
+    echo "Kernel version detected: ${KERNEL_VERSION:-unknown}"
+    echo "Module versions in initramfs: ${MODULE_VERSIONS}"
+
+    # Check if there's a mismatch
+    MODULE_COUNT=$(echo "${MODULE_VERSIONS}" | wc -l)
+    if [[ ${MODULE_COUNT} -gt 1 ]]; then
+        echo "WARNING: Multiple kernel module versions found in initramfs!"
+    fi
+
+    if [[ -n "${KERNEL_VERSION}" ]]; then
+        if ! echo "${MODULE_VERSIONS}" | grep -q "${KERNEL_VERSION}"; then
+            echo "ERROR: Kernel version mismatch detected!"
+            echo "  Kernel: ${KERNEL_VERSION}"
+            echo "  Modules: ${MODULE_VERSIONS}"
+            echo "This will cause module loading failures at boot time (e.g., vfat module)."
+            echo "The build used DIB_DNF_EXTRA_ARGS to exclude kernel updates, but a mismatch still occurred."
+            exit 1
+        fi
+    fi
+    echo "Kernel/module version check passed."
+else
+    echo "WARNING: Could not extract module versions from initramfs for verification"
 fi
 
 # Wrap kernel+ramdisk into a hybrid (BIOS + UEFI) ISO
