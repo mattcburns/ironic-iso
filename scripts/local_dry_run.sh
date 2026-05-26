@@ -31,9 +31,19 @@ if [[ ! -d .venv ]]; then
 fi
 source .venv/bin/activate
 python -m pip install --upgrade pip
-pip install diskimage-builder ironic-python-agent-builder
+
+# Default IPA branch (can be overridden by exporting IPA_BRANCH before running)
+: "${IPA_BRANCH:=stable/2026.1}"
+export IPA_BRANCH
+
+# Pin to coordinated versions for the 2026.1 series (same as the GitHub workflow)
+pip install \
+  diskimage-builder==3.40.2 \
+  ironic-python-agent-builder==7.2.0
+
+echo "Building with IPA_BRANCH=${IPA_BRANCH}"
 
 chmod +x scripts/build_ironic_iso.sh
 
-# Run the build
+# Run the build (IPA_BRANCH is picked up automatically by the build script)
 scripts/build_ironic_iso.sh

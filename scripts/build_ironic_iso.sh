@@ -4,14 +4,21 @@ set -euxo pipefail
 # Default configuration; can be overridden by env vars.
 : "${BASE_DISTRO:=centos}"
 : "${DIB_RELEASE:=9-stream}"          # CentOS Stream 9
-: "${IMAGE_NAME:=ironic-centos9-ipa}"
+: "${IPA_BRANCH:=stable/2026.1}"      # Ironic Python Agent branch (passed via -b to ironic-python-agent-builder)
 : "${ARTIFACTS_DIR:=artifacts}"
 : "${EFI_IMG_MB:=16}"                 # Size of the FAT EFI image
+
+# Derive a filesystem-friendly label from the branch (e.g. stable/2026.1 -> stable-2026.1)
+IPA_LABEL="${IPA_BRANCH//\//-}"
+
+# Default image name now incorporates the IPA branch for clear traceability in artifacts/releases
+: "${IMAGE_NAME:=ironic-centos9-ipa-${IPA_LABEL}}"
 
 mkdir -p "${ARTIFACTS_DIR}"
 
 echo "Using base distro: ${BASE_DISTRO}"
 echo "Using DIB release: ${DIB_RELEASE}"
+echo "IPA branch:        ${IPA_BRANCH}"
 echo "Image name:        ${IMAGE_NAME}"
 echo "Artifacts dir:     ${ARTIFACTS_DIR}"
 echo "EFI image size:    ${EFI_IMG_MB}MiB"
@@ -67,6 +74,7 @@ fi
 ironic-python-agent-builder \
   -o "${IPA_PREFIX}" \
   -r "${DIB_RELEASE}" \
+  -b "${IPA_BRANCH}" \
   "${EXTRA_E_ARGS[@]}" \
   "${BASE_DISTRO}"
 
@@ -216,8 +224,22 @@ xorriso -as mkisofs "${XORRISO_ARGS[@]}"
 cp "${IPA_KERNEL}" "${ARTIFACTS_DIR}/${IMAGE_NAME}.kernel"
 cp "${IPA_RAMDISK}" "${ARTIFACTS_DIR}/${IMAGE_NAME}.initramfs"
 
+# Write build metadata for traceability (IPA version, builder versions, etc.)
+BUILD_INFO="${ARTIFACTS_DIR}/build-info.txt"
+{
+  echo "IPA_BRANCH=${IPA_BRANCH}"
+  echo "IMAGE_NAME=${IMAGE_NAME}"
+  echo "BASE_DISTRO=${BASE_DISTRO}"
+  echo "DIB_RELEASE=${DIB_RELEASE}"
+  echo "BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  echo ""
+  echo "=== Python package versions (if available) ==="
+  python3 -m pip show diskimage-builder ironic-python-agent-builder 2>/dev/null || echo "(package info not available outside venv)"
+} > "${BUILD_INFO}"
+
 echo "Build complete. ISO at: ${ISO_OUTPUT}"
 echo "Kernel at: ${ARTIFACTS_DIR}/${IMAGE_NAME}.kernel"
 echo "Initramfs at: ${ARTIFACTS_DIR}/${IMAGE_NAME}.initramfs"
 echo "ESP image at: ${EFI_IMG}"
+echo "Build info at: ${BUILD_INFO}"
 ls -lh "${ARTIFACTS_DIR}"
