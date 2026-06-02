@@ -6,7 +6,13 @@ on:
     tags: [ "v*", "release-*" ]
   pull_request:
     branches: [ master ]
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      ipa_branch:
+        description: 'IPA branch/ref for ironic-python-agent (passed as -b/--branch to ironic-python-agent-builder)'
+        required: false
+        default: 'stable/2026.1'
+        type: string
 
 jobs:
   build-ironic-iso:
@@ -18,7 +24,7 @@ jobs:
     env:
       BASE_DISTRO: centos
       DIB_RELEASE: "9-stream"
-      IMAGE_NAME: ironic-centos9-ipa
+      IPA_BRANCH: ${{ github.event.inputs.ipa_branch || 'stable/2026.1' }}
       ARTIFACTS_DIR: artifacts
 
     steps:
@@ -76,12 +82,15 @@ jobs:
       - name: Upgrade pip and install Python packages
         run: |
           python3 -m pip install --upgrade pip
+          # Pin to coordinated versions for the 2026.1 release series for full reproducibility.
+          # These align with upper-constraints used by ironic-python-agent-builder 7.2.0.
           pip3 install \
-            diskimage-builder \
-            ironic-python-agent-builder
+            diskimage-builder==3.40.2 \
+            ironic-python-agent-builder==7.2.0
 
       - name: Show versions
         run: |
+          echo "IPA branch targeted: ${IPA_BRANCH}"
           python3 --version
           pip3 show diskimage-builder || true
           pip3 show ironic-python-agent-builder || true
@@ -90,6 +99,24 @@ jobs:
         run: |
           chmod +x scripts/build_ironic_iso.sh
           bash scripts/build_ironic_iso.sh
+
+      - name: Validate build-info.txt
+        run: |
+          echo "=== Contents of build-info.txt ==="
+          cat artifacts/build-info.txt
+          echo "=================================="
+
+          if [[ ! -f artifacts/build-info.txt ]]; then
+            echo "ERROR: artifacts/build-info.txt was not created"
+            exit 1
+          fi
+
+          if ! grep -q "IPA_BRANCH=${IPA_BRANCH}" artifacts/build-info.txt; then
+            echo "ERROR: build-info.txt does not contain the expected IPA_BRANCH=${IPA_BRANCH}"
+            exit 1
+          fi
+
+          echo "build-info.txt validation passed for IPA_BRANCH=${IPA_BRANCH}"
 
       - name: Upload ISO artifact
         uses: actions/upload-artifact@v4
@@ -100,6 +127,7 @@ jobs:
             artifacts/*.kernel
             artifacts/*.initramfs
             artifacts/*.img
+            artifacts/build-info.txt
           retention-days: 3
 
       - name: Upload logs and build outputs (optional)
@@ -135,5 +163,6 @@ jobs:
             dist/*.kernel
             dist/*.initramfs
             dist/*.img
+            dist/build-info.txt
           draft: false
           prerelease: false
