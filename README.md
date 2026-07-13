@@ -61,12 +61,12 @@ The workflow:
 - Builds IPA from a configurable branch (`IPA_BRANCH`, default `stable/2026.1`) using the builder's `-b` flag
 - Builds a CentOS Stream 9 based Ironic ISO with a hybrid BIOS/UEFI bootloader
 - Builds an ESP (EFI System Partition) image using CentOS-provided shim and GRUB
-- Uploads **separate** artifacts for the kernel, initramfs, ISO, ESP image, and `build-info.txt` (plus optional debug logs)
+- Uploads the ISO, kernel, initramfs, ESP image, and `build-info.txt` as build artifacts
 
 ## How to trigger
 
 - Push to `master`
-- Open a pull request targeting `master` (builds and uploads artifacts for PR testing)
+- Open a pull request targeting `master`
 - Or trigger manually:
 
 1. Go to **Actions** tab
@@ -76,50 +76,19 @@ The workflow:
 
 After the build completes, you will see a **"Validate build-info.txt"** step in the logs. This step confirms that the requested IPA branch was actually used and that `build-info.txt` was generated correctly.
 
-The built ISO (and other artifacts) will be available as an artifact attached to the workflow run. Artifact filenames include the IPA branch for easy identification. Artifacts are retained for **7 days**.
+The built ISO (and other artifacts) will be available as an artifact attached to the workflow run. Artifact filenames include the IPA branch for easy identification.
 
 ## How to download the ISO
 
-There are three options. **GitHub Actions always serves workflow artifacts as zip archives** (even when each artifact is a single file). You must unzip them before pointing Ironic at the kernel/initramfs/ISO. **GitHub Releases** attach the raw files (not zipped).
+There are two options:
 
-### Artifact names (Actions / PR builds)
-
-Download separately as needed:
-
-| Artifact | Contents after unzip |
-|----------|----------------------|
-| **`ironic-kernel`** | deploy kernel (`*.kernel`) |
-| **`ironic-initramfs`** | IPA ramdisk (`*.initramfs`) |
-| **`ironic-iso`** | hybrid BIOS/UEFI ISO (`*.iso`) |
-| **`ironic-esp`** | ESP (EFI) image (`*.img`) |
-| **`ironic-build-info`** | build metadata (`build-info.txt`) |
-
-Optional: **`build-logs-and-outputs`** — debug logs from the build.
-
-### 1) From a pull request (best for testing before merge)
-
-- Open the PR targeting `master`
-- Wait for the **Build Ironic ISO** check to finish
-- Use the bot comment on the PR (updated each successful build) for download links, or open the Actions run → **Artifacts**
-- Download the artifact zips you need (e.g. `ironic-kernel`, `ironic-initramfs`)
-- **Unzip** each download before use:
-
-```bash
-unzip ironic-kernel.zip
-unzip ironic-initramfs.zip
-# Then point Ironic at the extracted *.kernel and *.initramfs files
-```
-
-- For Ironic, use the extracted **kernel + initramfs** with dynamic-login append params as documented below
-
-### 2) From any workflow run (push, PR, or manual)
+1) From the workflow run artifacts (quickest)
 
 - Go to the **Actions** tab
-- Open the relevant run of "Build Ironic ISO"
-- Download the individual artifact zips listed above
-- **Unzip** before using the files with Ironic or virtual media
+- Open the latest run of "Build Ironic ISO"
+- Download the artifact named `ironic-centos9-iso` (contains versioned `*.iso`, `*.kernel`, `*.initramfs`, `*.img`, and `build-info.txt` files)
 
-### 3) From a GitHub Release (raw files, shareable permalink)
+2) From a GitHub Release (shareable permalink)
 
 - Create and push a tag, e.g. `v0.1.0`:
 
@@ -128,8 +97,9 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-- The workflow publishes a Release for that tag and attaches the built assets **as raw files** (`.kernel`, `.initramfs`, `.iso`, etc. — no unzip step)
-- Navigate to **Releases** in the repo to download the assets
+- The workflow will publish a Release for that tag and attach the built ISO.
+- Navigate to **Releases** in the repo to download the asset.
+
 ## Local dry run
 
 To test the build locally on a CentOS 9 Stream system, run:
@@ -163,87 +133,33 @@ Required packages (automatically installed by the GitHub Actions workflow and `l
 - `mtools` and `dosfstools` (for creating FAT EFI/ESP images)
 - `syslinux` and `syslinux-nonlinux` (for `isolinux.bin`/`isohdpfx.bin`)
 
-## Dynamic login (boot-time credentials)
+## Root Password
 
-No root password is baked into the image. The build includes diskimage-builder’s [`dynamic-login`](https://docs.openstack.org/diskimage-builder/latest/elements/dynamic-login/README.html) element so you can inject a root password and/or SSH key **at boot** via kernel command-line parameters. Prefer the **kernel + initramfs** artifacts (not only the ISO) so Ironic can pass append parameters cleanly.
+The built ISO includes a hardcoded root password for easier testing and development:
 
-### Generate credentials
+- **Username:** `root`
+- **Password:** `ironic`
 
-**Root password** must be encrypted, then base64-encoded:
+This password is set during the ISO build process via the `ironic-root-password` element.
 
-```bash
-# Produce the value for rootpwd=
-openssl passwd -6 -stdin <<< 'YOUR_PASSWORD' | base64 -w 0
-```
+### Customizing the Root Password
 
-**SSH public key** is passed as-is (quotes required on the kernel cmdline):
-
-```text
-sshkey="ssh-rsa AAAA... user@host"
-```
-
-Example append fragments (always **quote** values):
-
-```text
-rootpwd="<BASE64_OF_ENCRYPTED_HASH>"
-sshkey="ssh-rsa AAAA... user@host"
-# CentOS may block login under enforcing SELinux; optional for troubleshooting:
-selinux=0
-```
-
-### Global configuration (conductor-wide)
-
-Use this only in isolated lab/dev environments when every IPA boot should get the same login hooks. Do **not** put a real production password in global conductor config.
-
-In `/etc/ironic/ironic.conf` (section and option names can vary by release):
-
-```ini
-[pxe]
-# Modern Ironic uses kernel_append_params (legacy name: pxe_append_params)
-kernel_append_params = rootpwd="<BASE64_HASH>" sshkey="ssh-rsa AAAA... user@host" selinux=0
-```
-
-1. Generate `rootpwd` and/or prepare `sshkey` as above.
-2. Set `kernel_append_params` (or legacy `pxe_append_params`) under the boot-related section(s) your deployment uses (`[pxe]`, and any equivalent for other boot interfaces such as Redfish virtual media).
-3. Restart `ironic-conductor` so conductors reload the config.
-4. Subsequent IPA boots for nodes using that conductor receive the parameters.
-
-### Per-node configuration (troubleshooting one device)
-
-Preferred path for production: inject credentials for a **single** node without changing fleet-wide config.
+To change the root password, you can override the `IRONIC_ROOT_PASSWORD` environment variable when building:
 
 ```bash
-# Temporary / instance-scoped append params (exact property may depend on boot interface)
-baremetal node set <node> \
-  --instance-info kernel_append_params='rootpwd="<BASE64_HASH>" selinux=0'
-
-# Some sites store boot append data on driver_info instead; use what your
-# boot interface documents for extra kernel arguments.
+IRONIC_ROOT_PASSWORD=mypassword ./scripts/build_ironic_iso.sh
 ```
 
-Operator workflow:
-
-1. Generate a one-time password hash and/or use a temporary SSH public key.
-2. Set append params **only** on the node under investigation (`instance_info` for temporary use, or `driver_info` if that is how your boot driver expects them).
-3. Reboot or re-run deploy/clean/inspect so the node boots with the new kernel cmdline.
-4. Log in as root on console or SSH; collect IPA logs.
-5. **Remove** the temporary `rootpwd` / `sshkey` from that node when finished so the next boot is locked down again.
-
-### ISO-only boots
-
-The hybrid ISO’s `isolinux.cfg` uses a fixed `APPEND` line. Dynamic-login params for pure ISO/virtual-media boots without Ironic-managed kernel append require editing that boot config, or (recommended) publishing **kernel + initramfs** to Ironic and passing params via the global or per-node methods above.
-
-### Security notice
-
-- Prefer **per-node** temporary credentials for troubleshooting.
-- Global password/SSH injection is convenient for labs but is a security risk on shared or production conductors.
-- Base64-encoded password hashes avoid `$` escaping issues on the kernel command line.
-- Always quote parameter values.
-
-### Other build variables
-
-You can still override these when building:
-
+Other important variables you can override the same way:
 - `IPA_BRANCH` — Ironic Python Agent git branch/tag (default `stable/2026.1`)
 - `IMAGE_NAME` — base name for output files (default incorporates the IPA branch)
 - `DIB_RELEASE`, `BASE_DISTRO`, etc. (see the top of `build_ironic_iso.sh`)
+
+### Security Notice
+
+The hardcoded root password is intended **for development and testing only**. For production deployments, you should:
+
+1. Set a strong, unique password
+2. Consider using key-based authentication instead
+3. Disable direct root login if possible
+
