@@ -80,28 +80,46 @@ The built ISO (and other artifacts) will be available as an artifact attached to
 
 ## How to download the ISO
 
-There are three options:
+There are three options. **GitHub Actions always serves workflow artifacts as zip archives** (even when each artifact is a single file). You must unzip them before pointing Ironic at the kernel/initramfs/ISO. **GitHub Releases** attach the raw files (not zipped).
 
-1) From a pull request (best for testing before merge)
+### Artifact names (Actions / PR builds)
+
+Download separately as needed:
+
+| Artifact | Contents after unzip |
+|----------|----------------------|
+| **`ironic-kernel`** | deploy kernel (`*.kernel`) |
+| **`ironic-initramfs`** | IPA ramdisk (`*.initramfs`) |
+| **`ironic-iso`** | hybrid BIOS/UEFI ISO (`*.iso`) |
+| **`ironic-esp`** | ESP (EFI) image (`*.img`) |
+| **`ironic-build-info`** | build metadata (`build-info.txt`) |
+
+Optional: **`build-logs-and-outputs`** — debug logs from the build.
+
+### 1) From a pull request (best for testing before merge)
 
 - Open the PR targeting `master`
 - Wait for the **Build Ironic ISO** check to finish
-- Use the bot comment on the PR (updated each successful build) for direct download links, or open the Actions run → **Artifacts**
-- Download separately as needed:
-  - **`ironic-kernel`** — deploy kernel
-  - **`ironic-initramfs`** — IPA ramdisk
-  - **`ironic-iso`** — hybrid BIOS/UEFI ISO
-  - **`ironic-esp`** — ESP (EFI) image
-  - **`ironic-build-info`** — build metadata
-- For Ironic, use **kernel + initramfs** with dynamic-login append params as documented below
+- Use the bot comment on the PR (updated each successful build) for download links, or open the Actions run → **Artifacts**
+- Download the artifact zips you need (e.g. `ironic-kernel`, `ironic-initramfs`)
+- **Unzip** each download before use:
 
-2) From any workflow run (push, PR, or manual)
+```bash
+unzip ironic-kernel.zip
+unzip ironic-initramfs.zip
+# Then point Ironic at the extracted *.kernel and *.initramfs files
+```
+
+- For Ironic, use the extracted **kernel + initramfs** with dynamic-login append params as documented below
+
+### 2) From any workflow run (push, PR, or manual)
 
 - Go to the **Actions** tab
 - Open the relevant run of "Build Ironic ISO"
-- Download the individual artifacts listed above
+- Download the individual artifact zips listed above
+- **Unzip** before using the files with Ironic or virtual media
 
-3) From a GitHub Release (shareable permalink)
+### 3) From a GitHub Release (raw files, shareable permalink)
 
 - Create and push a tag, e.g. `v0.1.0`:
 
@@ -110,9 +128,8 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-- The workflow will publish a Release for that tag and attach the built ISO.
-- Navigate to **Releases** in the repo to download the asset.
-
+- The workflow publishes a Release for that tag and attaches the built assets **as raw files** (`.kernel`, `.initramfs`, `.iso`, etc. — no unzip step)
+- Navigate to **Releases** in the repo to download the assets
 ## Local dry run
 
 To test the build locally on a CentOS 9 Stream system, run:

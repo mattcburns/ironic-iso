@@ -134,7 +134,7 @@ jobs:
             echo "- **ironic-build-info** — build metadata"
             echo "- **build-logs-and-outputs** — debug logs (optional)"
             echo ""
-            echo "For Ironic, download **ironic-kernel** + **ironic-initramfs** and pass dynamic-login params via kernel append (see README)."
+            echo "GitHub serves these as zips — unzip before use. For Ironic, extract **ironic-kernel** + **ironic-initramfs** (see README)."
             echo ""
             echo "Files:"
             ls -lh artifacts/ | sed 's/^/- /'
@@ -253,8 +253,9 @@ jobs:
               '',
               ...(lines.length ? lines : [`- [Open Artifacts](${runUrl}#artifacts)`]),
               '',
-              'For Ironic deploy images, download **ironic-kernel** and **ironic-initramfs** separately.',
-              'Use dynamic-login kernel append params for temporary root/SSH access (see README).',
+              'GitHub serves each artifact as a **zip** — unzip before use (e.g. `unzip ironic-kernel.zip`).',
+              'For Ironic, extract **ironic-kernel** and **ironic-initramfs**, then use dynamic-login kernel append params (see README).',
+              'Tagged releases attach raw (unzipped) files instead.',
               '',
               '_This comment is updated on each successful PR build._',
             ].join('\n');
