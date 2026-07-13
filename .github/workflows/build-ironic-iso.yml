@@ -126,26 +126,60 @@ jobs:
             echo ""
             echo "Download from this run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}#artifacts"
             echo ""
-            echo "- Primary: **ironic-centos9-iso** (ISO, kernel, initramfs, ESP, build-info)"
-            echo "- Debug: **build-logs-and-outputs**"
+            echo "Separate downloads:"
+            echo "- **ironic-kernel** — deploy kernel"
+            echo "- **ironic-initramfs** — IPA ramdisk"
+            echo "- **ironic-iso** — hybrid BIOS/UEFI ISO"
+            echo "- **ironic-esp** — ESP (EFI) image"
+            echo "- **ironic-build-info** — build metadata"
+            echo "- **build-logs-and-outputs** — debug logs (optional)"
             echo ""
-            echo "For Ironic testing, prefer the \`.kernel\` and \`.initramfs\` files and pass dynamic-login params via kernel append (see README)."
+            echo "For Ironic, download **ironic-kernel** + **ironic-initramfs** and pass dynamic-login params via kernel append (see README)."
             echo ""
             echo "Files:"
             ls -lh artifacts/ | sed 's/^/- /'
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # Split uploads so kernel/initramfs can be downloaded without the full ISO bundle.
+      - name: Upload kernel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ironic-kernel
+          path: artifacts/*.kernel
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Upload initramfs artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ironic-initramfs
+          path: artifacts/*.initramfs
+          retention-days: 7
+          if-no-files-found: error
+
       - name: Upload ISO artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ironic-centos9-iso
-          path: |
-            artifacts/*.iso
-            artifacts/*.kernel
-            artifacts/*.initramfs
-            artifacts/*.img
-            artifacts/build-info.txt
+          name: ironic-iso
+          path: artifacts/*.iso
           retention-days: 7
+          if-no-files-found: error
+
+      - name: Upload ESP artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ironic-esp
+          path: artifacts/*.img
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Upload build-info artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ironic-build-info
+          path: artifacts/build-info.txt
+          retention-days: 7
+          if-no-files-found: error
 
       - name: Upload logs and build outputs (optional)
         if: always()
@@ -178,6 +212,16 @@ jobs:
             const runUrl = `https://github.com/${owner}/${repo}/actions/runs/${runId}`;
             const marker = '<!-- ironic-iso-artifacts -->';
 
+            // Prefer a stable, useful order in the PR comment.
+            const preferredOrder = [
+              'ironic-kernel',
+              'ironic-initramfs',
+              'ironic-iso',
+              'ironic-esp',
+              'ironic-build-info',
+              'build-logs-and-outputs',
+            ];
+
             const { data: artifactList } = await github.rest.actions.listWorkflowRunArtifacts({
               owner,
               repo,
@@ -185,13 +229,21 @@ jobs:
               per_page: 100,
             });
 
-            const lines = artifactList.artifacts
-              .filter((a) => !a.expired)
-              .map((a) => {
-                const sizeMiB = (a.size_in_bytes / (1024 * 1024)).toFixed(1);
-                const url = `${runUrl}/artifacts/${a.id}`;
-                return `- **[${a.name}](${url})** (${sizeMiB} MiB)`;
-              });
+            const artifacts = artifactList.artifacts.filter((a) => !a.expired);
+            artifacts.sort((a, b) => {
+              const ai = preferredOrder.indexOf(a.name);
+              const bi = preferredOrder.indexOf(b.name);
+              const aRank = ai === -1 ? preferredOrder.length : ai;
+              const bRank = bi === -1 ? preferredOrder.length : bi;
+              if (aRank !== bRank) return aRank - bRank;
+              return a.name.localeCompare(b.name);
+            });
+
+            const lines = artifacts.map((a) => {
+              const sizeMiB = (a.size_in_bytes / (1024 * 1024)).toFixed(1);
+              const url = `${runUrl}/artifacts/${a.id}`;
+              return `- **[${a.name}](${url})** (${sizeMiB} MiB)`;
+            });
 
             const body = [
               marker,
@@ -201,8 +253,8 @@ jobs:
               '',
               ...(lines.length ? lines : [`- [Open Artifacts](${runUrl}#artifacts)`]),
               '',
-              'Primary package: **ironic-centos9-iso** (ISO, kernel, initramfs, ESP, `build-info.txt`).',
-              'Prefer `.kernel` + `.initramfs` for Ironic with dynamic-login kernel append params (see README).',
+              'For Ironic deploy images, download **ironic-kernel** and **ironic-initramfs** separately.',
+              'Use dynamic-login kernel append params for temporary root/SSH access (see README).',
               '',
               '_This comment is updated on each successful PR build._',
             ].join('\n');
@@ -239,13 +291,14 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Download ISO artifact
+      - name: Download release artifacts
         uses: actions/download-artifact@v4
         with:
-          name: ironic-centos9-iso
+          pattern: ironic-*
           path: dist
+          merge-multiple: true
 
-      - name: Create GitHub Release and upload ISO
+      - name: Create GitHub Release and upload assets
         uses: softprops/action-gh-release@v2
         with:
           files: |

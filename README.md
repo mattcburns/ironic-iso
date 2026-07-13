@@ -61,7 +61,7 @@ The workflow:
 - Builds IPA from a configurable branch (`IPA_BRANCH`, default `stable/2026.1`) using the builder's `-b` flag
 - Builds a CentOS Stream 9 based Ironic ISO with a hybrid BIOS/UEFI bootloader
 - Builds an ESP (EFI System Partition) image using CentOS-provided shim and GRUB
-- Uploads the ISO, kernel, initramfs, ESP image, and `build-info.txt` as build artifacts
+- Uploads **separate** artifacts for the kernel, initramfs, ISO, ESP image, and `build-info.txt` (plus optional debug logs)
 
 ## How to trigger
 
@@ -86,15 +86,20 @@ There are three options:
 
 - Open the PR targeting `master`
 - Wait for the **Build Ironic ISO** check to finish
-- Open the check / linked Actions run → **Artifacts**
-- Download `ironic-centos9-iso` (versioned `*.iso`, `*.kernel`, `*.initramfs`, `*.img`, and `build-info.txt`)
-- Use the kernel + initramfs in Ironic with dynamic-login append params as documented below
+- Use the bot comment on the PR (updated each successful build) for direct download links, or open the Actions run → **Artifacts**
+- Download separately as needed:
+  - **`ironic-kernel`** — deploy kernel
+  - **`ironic-initramfs`** — IPA ramdisk
+  - **`ironic-iso`** — hybrid BIOS/UEFI ISO
+  - **`ironic-esp`** — ESP (EFI) image
+  - **`ironic-build-info`** — build metadata
+- For Ironic, use **kernel + initramfs** with dynamic-login append params as documented below
 
 2) From any workflow run (push, PR, or manual)
 
 - Go to the **Actions** tab
 - Open the relevant run of "Build Ironic ISO"
-- Download the artifact named `ironic-centos9-iso`
+- Download the individual artifacts listed above
 
 3) From a GitHub Release (shareable permalink)
 
