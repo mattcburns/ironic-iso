@@ -118,6 +118,20 @@ jobs:
 
           echo "build-info.txt validation passed for IPA_BRANCH=${IPA_BRANCH}"
 
+      - name: Summarize artifacts
+        if: success()
+        run: |
+          {
+            echo "## Build artifacts"
+            echo ""
+            echo "Download the **ironic-centos9-iso** artifact from this run (ISO, kernel, initramfs, ESP, build-info)."
+            echo ""
+            echo "For Ironic testing, prefer the \`.kernel\` and \`.initramfs\` files and pass dynamic-login params via kernel append (see README)."
+            echo ""
+            echo "Files:"
+            ls -lh artifacts/ | sed 's/^/- /'
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Upload ISO artifact
         uses: actions/upload-artifact@v4
         with:
@@ -128,7 +142,7 @@ jobs:
             artifacts/*.initramfs
             artifacts/*.img
             artifacts/build-info.txt
-          retention-days: 3
+          retention-days: 7
 
       - name: Upload logs and build outputs (optional)
         if: always()
