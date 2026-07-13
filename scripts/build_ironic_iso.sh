@@ -49,7 +49,7 @@ export ELEMENTS_PATH="${REPO_ROOT}/elements${ELEMENTS_PATH:+:${ELEMENTS_PATH}}"
 # Extra elements to include in addition to the default ipa ramdisk elements
 # Do NOT include 'ironic-python-agent-ramdisk' here; the builder adds it.
 # Space-separated list, e.g. "element-manifest some-driver". Can be empty.
-ELEMENTS_EXTRA="element-manifest ironic-root-password cloud-init"
+ELEMENTS_EXTRA="element-manifest dynamic-login cloud-init"
 
 # Build the ramdisk + kernel using ironic-python-agent-builder
 # Note: This creates a kernel and ramdisk; we then wrap into an ISO.

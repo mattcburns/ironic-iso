@@ -118,17 +118,68 @@ jobs:
 
           echo "build-info.txt validation passed for IPA_BRANCH=${IPA_BRANCH}"
 
+      - name: Summarize artifacts
+        if: success()
+        run: |
+          {
+            echo "## Build artifacts"
+            echo ""
+            echo "Download from this run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}#artifacts"
+            echo ""
+            echo "Separate downloads:"
+            echo "- **ironic-kernel** — deploy kernel"
+            echo "- **ironic-initramfs** — IPA ramdisk"
+            echo "- **ironic-iso** — hybrid BIOS/UEFI ISO"
+            echo "- **ironic-esp** — ESP (EFI) image"
+            echo "- **ironic-build-info** — build metadata"
+            echo "- **build-logs-and-outputs** — debug logs (optional)"
+            echo ""
+            echo "GitHub serves these as zips — unzip before use. For Ironic, extract **ironic-kernel** + **ironic-initramfs** (see README)."
+            echo ""
+            echo "Files:"
+            ls -lh artifacts/ | sed 's/^/- /'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Split uploads so kernel/initramfs can be downloaded without the full ISO bundle.
+      - name: Upload kernel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ironic-kernel
+          path: artifacts/*.kernel
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Upload initramfs artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ironic-initramfs
+          path: artifacts/*.initramfs
+          retention-days: 7
+          if-no-files-found: error
+
       - name: Upload ISO artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ironic-centos9-iso
-          path: |
-            artifacts/*.iso
-            artifacts/*.kernel
-            artifacts/*.initramfs
-            artifacts/*.img
-            artifacts/build-info.txt
-          retention-days: 3
+          name: ironic-iso
+          path: artifacts/*.iso
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Upload ESP artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ironic-esp
+          path: artifacts/*.img
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Upload build-info artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ironic-build-info
+          path: artifacts/build-info.txt
+          retention-days: 7
+          if-no-files-found: error
 
       - name: Upload logs and build outputs (optional)
         if: always()
@@ -141,6 +192,98 @@ jobs:
             artifacts/**
           if-no-files-found: ignore
 
+  # Separate job on ubuntu so Node-based actions work (build runs in CentOS container).
+  comment-pr-artifacts:
+    name: Comment artifact links on PR
+    needs: build-ironic-iso
+    if: github.event_name == 'pull_request' && needs.build-ironic-iso.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      actions: read
+    steps:
+      - name: Post or update PR comment with artifact links
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const runId = context.runId;
+            const runUrl = `https://github.com/${owner}/${repo}/actions/runs/${runId}`;
+            const marker = '<!-- ironic-iso-artifacts -->';
+
+            // Prefer a stable, useful order in the PR comment.
+            const preferredOrder = [
+              'ironic-kernel',
+              'ironic-initramfs',
+              'ironic-iso',
+              'ironic-esp',
+              'ironic-build-info',
+              'build-logs-and-outputs',
+            ];
+
+            const { data: artifactList } = await github.rest.actions.listWorkflowRunArtifacts({
+              owner,
+              repo,
+              run_id: runId,
+              per_page: 100,
+            });
+
+            const artifacts = artifactList.artifacts.filter((a) => !a.expired);
+            artifacts.sort((a, b) => {
+              const ai = preferredOrder.indexOf(a.name);
+              const bi = preferredOrder.indexOf(b.name);
+              const aRank = ai === -1 ? preferredOrder.length : ai;
+              const bRank = bi === -1 ? preferredOrder.length : bi;
+              if (aRank !== bRank) return aRank - bRank;
+              return a.name.localeCompare(b.name);
+            });
+
+            const lines = artifacts.map((a) => {
+              const sizeMiB = (a.size_in_bytes / (1024 * 1024)).toFixed(1);
+              const url = `${runUrl}/artifacts/${a.id}`;
+              return `- **[${a.name}](${url})** (${sizeMiB} MiB)`;
+            });
+
+            const body = [
+              marker,
+              '### Build artifacts',
+              '',
+              `From workflow run [#${runId}](${runUrl}):`,
+              '',
+              ...(lines.length ? lines : [`- [Open Artifacts](${runUrl}#artifacts)`]),
+              '',
+              'GitHub serves each artifact as a **zip** — unzip before use (e.g. `unzip ironic-kernel.zip`).',
+              'For Ironic, extract **ironic-kernel** and **ironic-initramfs**, then use dynamic-login kernel append params (see README).',
+              'Tagged releases attach raw (unzipped) files instead.',
+              '',
+              '_This comment is updated on each successful PR build._',
+            ].join('\n');
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner,
+              repo,
+              issue_number: context.issue.number,
+              per_page: 100,
+            });
+
+            const existing = comments.find((c) => c.body && c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
+
   publish-release:
     name: Publish GitHub Release
     needs: build-ironic-iso
@@ -149,13 +292,14 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Download ISO artifact
+      - name: Download release artifacts
         uses: actions/download-artifact@v4
         with:
-          name: ironic-centos9-iso
+          pattern: ironic-*
           path: dist
+          merge-multiple: true
 
-      - name: Create GitHub Release and upload ISO
+      - name: Create GitHub Release and upload assets
         uses: softprops/action-gh-release@v2
         with:
           files: |
