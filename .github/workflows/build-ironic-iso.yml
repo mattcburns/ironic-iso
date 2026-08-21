@@ -16,7 +16,15 @@ on:
 
 jobs:
   build-ironic-iso:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runs_on: ubuntu-latest
+          - arch: arm64
+            runs_on: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runs_on }}
     container:
       image: quay.io/centos/centos:stream9
       options: --privileged
@@ -24,6 +32,7 @@ jobs:
     env:
       BASE_DISTRO: centos
       DIB_RELEASE: "9-stream"
+      DIB_ARCH: ${{ matrix.arch }}
       IPA_BRANCH: ${{ github.event.inputs.ipa_branch || 'stable/2026.1' }}
       ARTIFACTS_DIR: artifacts
 
@@ -31,7 +40,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install system dependencies
+      - name: Install common system dependencies
         run: |
           dnf install -y \
             git \
@@ -39,8 +48,6 @@ jobs:
             kpartx \
             squashfs-tools \
             xorriso \
-            syslinux \
-            syslinux-nonlinux \
             python3-devel \
             gcc \
             make \
@@ -48,9 +55,23 @@ jobs:
             openssl-devel \
             python3-pip \
             dosfstools \
-            mtools \
+            mtools
+
+      - name: Install amd64 (BIOS + UEFI) boot dependencies
+        if: matrix.arch == 'amd64'
+        run: |
+          dnf install -y \
+            syslinux \
+            syslinux-nonlinux \
             shim-x64 \
             grub2-efi-x64
+
+      - name: Install arm64 (UEFI-only) boot dependencies
+        if: matrix.arch == 'arm64'
+        run: |
+          dnf install -y \
+            shim-aa64 \
+            grub2-efi-aa64
 
       - name: Create sudo wrapper for container
         run: |
@@ -102,39 +123,46 @@ jobs:
 
       - name: Validate build-info.txt
         run: |
-          echo "=== Contents of build-info.txt ==="
-          cat artifacts/build-info.txt
+          BUILD_INFO_FILE=$(ls artifacts/*-build-info.txt 2>/dev/null || true)
+
+          if [[ -z "${BUILD_INFO_FILE}" ]]; then
+            echo "ERROR: no *-build-info.txt was created under artifacts/"
+            exit 1
+          fi
+
+          echo "=== Contents of ${BUILD_INFO_FILE} ==="
+          cat "${BUILD_INFO_FILE}"
           echo "=================================="
 
-          if [[ ! -f artifacts/build-info.txt ]]; then
-            echo "ERROR: artifacts/build-info.txt was not created"
+          if ! grep -q "IPA_BRANCH=${IPA_BRANCH}" "${BUILD_INFO_FILE}"; then
+            echo "ERROR: ${BUILD_INFO_FILE} does not contain the expected IPA_BRANCH=${IPA_BRANCH}"
             exit 1
           fi
 
-          if ! grep -q "IPA_BRANCH=${IPA_BRANCH}" artifacts/build-info.txt; then
-            echo "ERROR: build-info.txt does not contain the expected IPA_BRANCH=${IPA_BRANCH}"
+          if ! grep -q "DIB_ARCH=${DIB_ARCH}" "${BUILD_INFO_FILE}"; then
+            echo "ERROR: ${BUILD_INFO_FILE} does not contain the expected DIB_ARCH=${DIB_ARCH}"
             exit 1
           fi
 
-          echo "build-info.txt validation passed for IPA_BRANCH=${IPA_BRANCH}"
+          echo "build-info.txt validation passed for IPA_BRANCH=${IPA_BRANCH}, DIB_ARCH=${DIB_ARCH}"
 
       - name: Upload ISO artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ironic-centos9-iso
+          name: ironic-centos9-iso-${{ matrix.arch }}
           path: |
             artifacts/*.iso
             artifacts/*.kernel
             artifacts/*.initramfs
             artifacts/*.img
-            artifacts/build-info.txt
+            artifacts/*-build-info.txt
           retention-days: 3
 
       - name: Upload logs and build outputs (optional)
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: build-logs-and-outputs
+          name: build-logs-and-outputs-${{ matrix.arch }}
           path: |
             ipa-build/**
             iso-work/**
@@ -149,11 +177,12 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Download ISO artifact
+      - name: Download ISO artifacts (all arches)
         uses: actions/download-artifact@v4
         with:
-          name: ironic-centos9-iso
+          pattern: ironic-centos9-iso-*
           path: dist
+          merge-multiple: true
 
       - name: Create GitHub Release and upload ISO
         uses: softprops/action-gh-release@v2
@@ -163,6 +192,6 @@ jobs:
             dist/*.kernel
             dist/*.initramfs
             dist/*.img
-            dist/build-info.txt
+            dist/*-build-info.txt
           draft: false
           prerelease: false

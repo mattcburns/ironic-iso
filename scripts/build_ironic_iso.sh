@@ -7,17 +7,38 @@ set -euxo pipefail
 : "${IPA_BRANCH:=stable/2026.1}"      # Ironic Python Agent branch (passed via -b to ironic-python-agent-builder)
 : "${ARTIFACTS_DIR:=artifacts}"
 : "${EFI_IMG_MB:=16}"                 # Size of the FAT EFI image
+: "${DIB_ARCH:=amd64}"                # Target architecture: amd64 or arm64
+
+case "${DIB_ARCH}" in
+  amd64)
+    EFI_SUFFIX="x64"
+    EFI_BOOT_FILE="BOOTX64.EFI"
+    BUILD_BIOS_BOOT=1
+    ;;
+  arm64)
+    EFI_SUFFIX="aa64"
+    EFI_BOOT_FILE="BOOTAA64.EFI"
+    # aarch64 has no legacy BIOS mode; the ISO is UEFI-only.
+    BUILD_BIOS_BOOT=0
+    ;;
+  *)
+    echo "ERROR: Unsupported DIB_ARCH '${DIB_ARCH}' (expected 'amd64' or 'arm64')"
+    exit 1
+    ;;
+esac
 
 # Derive a filesystem-friendly label from the branch (e.g. stable/2026.1 -> stable-2026.1)
 IPA_LABEL="${IPA_BRANCH//\//-}"
 
-# Default image name now incorporates the IPA branch for clear traceability in artifacts/releases
-: "${IMAGE_NAME:=ironic-centos9-ipa-${IPA_LABEL}}"
+# Default image name now incorporates the IPA branch and target arch for clear
+# traceability in artifacts/releases
+: "${IMAGE_NAME:=ironic-centos9-ipa-${IPA_LABEL}-${DIB_ARCH}}"
 
 mkdir -p "${ARTIFACTS_DIR}"
 
 echo "Using base distro: ${BASE_DISTRO}"
 echo "Using DIB release: ${DIB_RELEASE}"
+echo "Target arch:       ${DIB_ARCH}"
 echo "IPA branch:        ${IPA_BRANCH}"
 echo "Image name:        ${IMAGE_NAME}"
 echo "Artifacts dir:     ${ARTIFACTS_DIR}"
@@ -76,6 +97,7 @@ ironic-python-agent-builder \
   -r "${DIB_RELEASE}" \
   -b "${IPA_BRANCH}" \
   "${EXTRA_E_ARGS[@]}" \
+  --extra-args "-a ${DIB_ARCH}" \
   "${BASE_DISTRO}"
 
 IPA_KERNEL="${IPA_PREFIX}.kernel"
@@ -139,19 +161,23 @@ else
     echo "WARNING: Could not extract module versions from initramfs for verification"
 fi
 
-# Wrap kernel+ramdisk into a hybrid (BIOS + UEFI) ISO
+# Wrap kernel+ramdisk into an ISO. On amd64 this is a hybrid BIOS (isolinux) +
+# UEFI (GRUB) ISO. On arm64 there is no legacy BIOS mode, so it's UEFI-only.
 ISO_OUTPUT="${ARTIFACTS_DIR}/${IMAGE_NAME}.iso"
 
 echo "Creating ISO: ${ISO_OUTPUT}"
 WORKDIR="$(pwd)/iso-work"
-mkdir -p "${WORKDIR}/isolinux"
 mkdir -p "${WORKDIR}/boot"
 mkdir -p "${WORKDIR}/EFI"
 
 cp "${IPA_KERNEL}" "${WORKDIR}/boot/vmlinuz"
 cp "${IPA_RAMDISK}" "${WORKDIR}/boot/initrd.img"
 
-cat > "${WORKDIR}/isolinux/isolinux.cfg" <<EOF
+ISOHYBRID_MBR=""
+if [[ "${BUILD_BIOS_BOOT}" == "1" ]]; then
+  mkdir -p "${WORKDIR}/isolinux"
+
+  cat > "${WORKDIR}/isolinux/isolinux.cfg" <<EOF
 DEFAULT ipa
 LABEL ipa
   KERNEL /boot/vmlinuz
@@ -160,36 +186,37 @@ TIMEOUT 50
 PROMPT 0
 EOF
 
-# Basic isolinux bootloader files are typically provided by syslinux
-# On CentOS/RHEL, they live under /usr/share/syslinux
-ISOLINUX_BIN="/usr/share/syslinux/isolinux.bin"
-if [[ ! -f "${ISOLINUX_BIN}" ]]; then
-    echo "ERROR: isolinux.bin not found at ${ISOLINUX_BIN}"
-    echo "Check syslinux installation path on this runner."
-    exit 1
-fi
-cp "${ISOLINUX_BIN}" "${WORKDIR}/isolinux/isolinux.bin"
+  # Basic isolinux bootloader files are typically provided by syslinux
+  # On CentOS/RHEL, they live under /usr/share/syslinux
+  ISOLINUX_BIN="/usr/share/syslinux/isolinux.bin"
+  if [[ ! -f "${ISOLINUX_BIN}" ]]; then
+      echo "ERROR: isolinux.bin not found at ${ISOLINUX_BIN}"
+      echo "Check syslinux installation path on this runner."
+      exit 1
+  fi
+  cp "${ISOLINUX_BIN}" "${WORKDIR}/isolinux/isolinux.bin"
 
-ISOHYBRID_MBR="/usr/share/syslinux/isohdpfx.bin"
-if [[ ! -f "${ISOHYBRID_MBR}" ]]; then
-    echo "WARNING: isohdpfx.bin not found at ${ISOHYBRID_MBR}; ISO will still build but hybrid MBR may be missing"
-    ISOHYBRID_MBR=""
+  ISOHYBRID_MBR="/usr/share/syslinux/isohdpfx.bin"
+  if [[ ! -f "${ISOHYBRID_MBR}" ]]; then
+      echo "WARNING: isohdpfx.bin not found at ${ISOHYBRID_MBR}; ISO will still build but hybrid MBR may be missing"
+      ISOHYBRID_MBR=""
+  fi
 fi
 
 # Build ESP image
-EFI_IMG="${ARTIFACTS_DIR}/esp.img"
+EFI_IMG="${ARTIFACTS_DIR}/${IMAGE_NAME}-esp.img"
 echo "Building ESP image..."
 
-# Paths for CentOS 9 Stream packages
-SRC_SHIM="/boot/efi/EFI/centos/shimx64.efi"
-SRC_GRUB="/boot/efi/EFI/centos/grubx64.efi"
+# Paths for CentOS 9 Stream packages (arch-specific shim/grub file names)
+SRC_SHIM="/boot/efi/EFI/centos/shim${EFI_SUFFIX}.efi"
+SRC_GRUB="/boot/efi/EFI/centos/grub${EFI_SUFFIX}.efi"
 
 dd if=/dev/zero of="${EFI_IMG}" bs=1M count=16 status=none
 mkfs.msdos -F 12 -n 'ESP_IMAGE' "${EFI_IMG}" > /dev/null
 mmd -i "${EFI_IMG}" ::EFI
 mmd -i "${EFI_IMG}" ::EFI/BOOT
-mcopy -i "${EFI_IMG}" "${SRC_SHIM}" ::EFI/BOOT/BOOTX64.EFI
-mcopy -i "${EFI_IMG}" "${SRC_GRUB}" ::EFI/BOOT/grubx64.efi
+mcopy -i "${EFI_IMG}" "${SRC_SHIM}" "::EFI/BOOT/${EFI_BOOT_FILE}"
+mcopy -i "${EFI_IMG}" "${SRC_GRUB}" "::EFI/BOOT/grub${EFI_SUFFIX}.efi"
 
 echo "Done. Created ${EFI_IMG}"
 
@@ -198,15 +225,23 @@ mkdir -p "${WORKDIR}/EFI"
 EFI_ISO_BOOT="${WORKDIR}/EFI/efiboot.img"
 cp "${EFI_IMG}" "${EFI_ISO_BOOT}"
 
-# Assemble the hybrid ISO: isolinux for BIOS, GRUB for UEFI
+# Assemble the ISO: isolinux for BIOS (amd64 only) + GRUB for UEFI
 XORRISO_ARGS=(
   -o "${ISO_OUTPUT}"
-  -b isolinux/isolinux.bin
-  -c isolinux/boot.cat
-  -no-emul-boot
-  -boot-load-size 4
-  -boot-info-table
-  -eltorito-alt-boot
+)
+
+if [[ "${BUILD_BIOS_BOOT}" == "1" ]]; then
+  XORRISO_ARGS+=(
+    -b isolinux/isolinux.bin
+    -c isolinux/boot.cat
+    -no-emul-boot
+    -boot-load-size 4
+    -boot-info-table
+    -eltorito-alt-boot
+  )
+fi
+
+XORRISO_ARGS+=(
   -e EFI/efiboot.img
   -no-emul-boot
   -isohybrid-gpt-basdat
@@ -225,12 +260,13 @@ cp "${IPA_KERNEL}" "${ARTIFACTS_DIR}/${IMAGE_NAME}.kernel"
 cp "${IPA_RAMDISK}" "${ARTIFACTS_DIR}/${IMAGE_NAME}.initramfs"
 
 # Write build metadata for traceability (IPA version, builder versions, etc.)
-BUILD_INFO="${ARTIFACTS_DIR}/build-info.txt"
+BUILD_INFO="${ARTIFACTS_DIR}/${IMAGE_NAME}-build-info.txt"
 {
   echo "IPA_BRANCH=${IPA_BRANCH}"
   echo "IMAGE_NAME=${IMAGE_NAME}"
   echo "BASE_DISTRO=${BASE_DISTRO}"
   echo "DIB_RELEASE=${DIB_RELEASE}"
+  echo "DIB_ARCH=${DIB_ARCH}"
   echo "BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   echo ""
   echo "=== Python package versions (if available) ==="
