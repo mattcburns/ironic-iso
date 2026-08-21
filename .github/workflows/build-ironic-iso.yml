@@ -172,11 +172,33 @@ jobs:
   publish-release:
     name: Publish GitHub Release
     needs: build-ironic-iso
-    if: startsWith(github.ref, 'refs/tags/')
+    if: startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
+      - name: Determine release tag
+        id: release
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            # Tag push: publish a proper tagged release (e.g. v0.1.0)
+            TAG_NAME="${GITHUB_REF#refs/tags/}"
+            RELEASE_NAME="${TAG_NAME}"
+            PRERELEASE="false"
+          else
+            # Plain merge to master: publish a per-merge snapshot release,
+            # tagged uniquely by run number + short commit SHA so every
+            # merge gets its own downloadable release without clobbering
+            # earlier ones.
+            SHORT_SHA="$(echo "${GITHUB_SHA}" | cut -c1-7)"
+            TAG_NAME="build-${GITHUB_RUN_NUMBER}-${SHORT_SHA}"
+            RELEASE_NAME="Build ${GITHUB_RUN_NUMBER} (${SHORT_SHA})"
+            PRERELEASE="true"
+          fi
+          echo "tag_name=${TAG_NAME}" >> "$GITHUB_OUTPUT"
+          echo "release_name=${RELEASE_NAME}" >> "$GITHUB_OUTPUT"
+          echo "prerelease=${PRERELEASE}" >> "$GITHUB_OUTPUT"
+
       - name: Download ISO artifacts (all arches)
         uses: actions/download-artifact@v4
         with:
@@ -187,6 +209,10 @@ jobs:
       - name: Create GitHub Release and upload ISO
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.release.outputs.tag_name }}
+          name: ${{ steps.release.outputs.release_name }}
+          target_commitish: ${{ github.sha }}
+          generate_release_notes: true
           files: |
             dist/*.iso
             dist/*.kernel
@@ -194,4 +220,4 @@ jobs:
             dist/*.img
             dist/*-build-info.txt
           draft: false
-          prerelease: false
+          prerelease: ${{ steps.release.outputs.prerelease }}
