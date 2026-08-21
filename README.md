@@ -96,7 +96,7 @@ The built ISO (and other artifacts) will be available as an artifact attached to
 
 ## How to download the ISO
 
-There are two options:
+There are three options:
 
 1) From the workflow run artifacts (quickest)
 
@@ -104,7 +104,13 @@ There are two options:
 - Open the latest run of "Build Ironic ISO"
 - Download `ironic-centos9-iso-amd64` and/or `ironic-centos9-iso-arm64` (each contains versioned `*.iso`, `*.kernel`, `*.initramfs`, `*-esp.img`, and `*-build-info.txt` files for that architecture)
 
-2) From a GitHub Release (shareable permalink)
+2) From an automatic per-merge Release (every merge to `master`)
+
+- Every push to `master` (i.e. every merged PR) automatically publishes a **prerelease** GitHub Release tagged `build-<run number>-<short SHA>`, e.g. `build-42-a1b2c3d`, with both arches' artifacts attached.
+- Navigate to **Releases** in the repo and grab the topmost one for the latest `master` build.
+- These accumulate over time (one per merge); prune old ones from the Releases page if desired.
+
+3) From a version-tagged Release (shareable permalink)
 
 - Create and push a tag, e.g. `v0.1.0`:
 
@@ -113,7 +119,7 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-- The workflow will publish a Release for that tag and attach the built ISO.
+- The workflow will publish a full (non-prerelease) Release for that tag and attach the built ISO.
 - Navigate to **Releases** in the repo to download the asset.
 
 ## Local dry run
